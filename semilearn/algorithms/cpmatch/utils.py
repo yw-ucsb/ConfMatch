@@ -62,22 +62,26 @@ class CpMatchThresholdingHook(MaskingHook):
         def selective_risk_ub(lam): return brentq(invert_for_ub,0,0.9999,args=(lam,))
 
         # Compute the smallest risk
-        lambdas = np.array([lam for lam in lambdas if nlambda(lam) >= 4]) # Make sure there's some data in the top bin.
+        lambdas = np.array([lam for lam in lambdas if nlambda(lam) >= 10]) # Make sure there's some data in the top bin.
         # print(len(lambdas))
         risks = np.array([selective_risk(lam) for lam in lambdas])
         # print(risks)
         risk_min = risks.min()
-        gamma = 0.75
+        gamma = 0.5
         self.cp_alpha = gamma * cal_error_rate + (1-gamma) * risk_min
-        print(f'Cal Error:{100*cal_error_rate:.2f}%, min risk:{100*risk_min:.2f}%, alpha:{100*self.cp_alpha:.2f}')
+        # print(f'Cal Error:{100*cal_error_rate:.2f}%, min risk:{100*risk_min:.2f}%, alpha:{100*self.cp_alpha:.2f}')
         # Scan to choose lamabda hat
-        for lhat in np.flip(lambdas):
-            # print(lhat)
-            risk = selective_risk_ub(lhat-1/lambdas.shape[0])
-            # print(risk, lhat, lambdas.shape[0])
-            if risk > self.cp_alpha: 
-                print(f'Cal Error:{100*cal_error_rate:.2f}%, min risk:{100*risk_min:.2f}%, alpha:{100*self.cp_alpha:.2f}, threshold:{lhat:.3f}')
-                return lhat.item()
+        try:
+            for lhat in np.flip(lambdas):
+                # print('lhat: ',lhat, lhat-1/lambdas.shape[0])
+                risk = selective_risk_ub(lhat-1/lambdas.shape[0])
+                # print('risk: ',risk, lhat, lambdas.shape[0])
+                if risk > self.cp_alpha: 
+                    print(f'Cal Error:{100*cal_error_rate:.2f}%, min risk:{100*risk_min:.2f}%, alpha:{100*self.cp_alpha:.2f}, threshold:{lhat:.2f}')
+                    return lhat.item()
+        except:
+            print(f'Failed control. Cal Error:{100*cal_error_rate:.2f}%, min risk:{100*risk_min:.2f}%, alpha:{100*self.cp_alpha:.2f}, threshold:0.95')
+            return 0.95
     
     @torch.no_grad()
     def update(self, algorithm):
