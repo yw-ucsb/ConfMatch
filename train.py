@@ -249,8 +249,8 @@ def get_config():
                 default=argument.default,
                 help=argument.help,
             )
-    args = parser.parse_args()
     over_write_args_from_file(args, args.c)
+    args = parser.parse_args()
     return args
 
 

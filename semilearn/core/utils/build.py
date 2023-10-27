@@ -7,7 +7,7 @@ import logging
 import random
 import torch
 import torch.distributed as dist
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, random_split
 from semilearn.datasets import get_collactor, name2sampler
 from semilearn.nets.utils import param_groups_layer_decay, param_groups_weight_decay
 
@@ -104,7 +104,14 @@ def get_dataset(args, algorithm, dataset, num_labels, num_classes, data_dir='./d
     else:
         return None
     
-    dataset_dict = {'train_lb': lb_dset, 'train_ulb': ulb_dset, 'eval': eval_dset, 'test': test_dset}
+    # CpMatch algorithm: split labeled dataset： dataset_dict["train_lb"] --> dataset_dict["train_lb"], dataset_dict["cali"]
+    if algorithm == 'cpmatch':
+        generator = torch.Generator().manual_seed(42)
+        lb_dset, ca_dset = random_split(lb_dset, [0.7, 0.3], generator=generator)
+        dataset_dict = {'train_lb': lb_dset, 'train_ulb': ulb_dset, 'eval': eval_dset, 'test': test_dset, 'cali':ca_dset}
+    else:
+        dataset_dict = {'train_lb': lb_dset, 'train_ulb': ulb_dset, 'eval': eval_dset, 'test': test_dset}
+        
     return dataset_dict
 
 

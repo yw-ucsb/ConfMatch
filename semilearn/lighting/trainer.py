@@ -27,12 +27,24 @@ class Trainer:
         self.logger = get_logger(config.save_name, save_path=self.save_path, level="INFO")
 
 
-    def fit(self, train_lb_loader, train_ulb_loader, eval_loader):
-        self.algorithm.loader_dict = {
-            'train_lb': train_lb_loader,
-            'train_ulb': train_ulb_loader,
-            'eval': eval_loader
-        }
+    def fit(self, train_lb_loader=None, train_ulb_loader=None, eval_loader=None, cali_loader=None):
+        # self.algorithm.loader_dict = {
+        #     'train_lb': train_lb_loader,
+        #     'train_ulb': train_ulb_loader,
+        #     'eval': eval_loader
+        # }
+        if train_lb_loader is not None:
+            self.algorithm.loader_dict['train_lb'] = train_lb_loader
+        else:
+            train_lb_loader = self.algorithm.loader_dict['train_lb']
+        if train_ulb_loader is not None:
+            self.algorithm.loader_dict['train_ulb'] = train_ulb_loader
+        else:
+            train_ulb_loader = self.algorithm.loader_dict['train_ulb']
+        if eval_loader is not None:
+            self.algorithm.loader_dict['eval'] = eval_loader
+        else:
+            eval_loader = self.algorithm.loader_dict['eval']
         self.algorithm.model.train()
         # train
         self.algorithm.it = 0

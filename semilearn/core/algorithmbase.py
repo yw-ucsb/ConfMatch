@@ -40,7 +40,6 @@ from sklearn.metrics import (
 )
 from torch.cuda.amp import GradScaler, autocast
 
-
 class AlgorithmBase:
     """
     Base class for algorithms
@@ -144,6 +143,10 @@ class AlgorithmBase:
         if dataset_dict is None:
             return dataset_dict
 
+        # CpMatch algorithm: 
+        if self.args.algorithm == 'cpmatch':
+            self.args.cali_dest_len = len(dataset_dict["cali"])
+        
         self.args.ulb_dest_len = (
             len(dataset_dict["train_ulb"])
             if dataset_dict["train_ulb"] is not None
@@ -178,6 +181,20 @@ class AlgorithmBase:
             num_workers=self.args.num_workers,
             distributed=self.distributed,
         )
+        
+        # CpMatch algorithm: 
+        if self.args.algorithm == 'cpmatch':
+            loader_dict["cali"] = get_data_loader(
+                self.args,
+                self.dataset_dict["cali"],
+                self.args.eval_batch_size,
+                data_sampler=None,
+                # num_iters=self.num_train_iter,
+                # num_epochs=self.epochs,
+                num_workers=self.args.num_workers,
+                # distributed=self.distributed,
+                drop_last=False,
+            )
 
         loader_dict["train_ulb"] = get_data_loader(
             self.args,
