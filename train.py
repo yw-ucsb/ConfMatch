@@ -216,7 +216,7 @@ def get_config():
     )
     parser.add_argument("--gpu", default=None, type=int, help="GPU id to use.")
     parser.add_argument(
-        "--multiprocessing-distributed",
+        "--multiprocessing_distributed",
         type=str2bool,
         default=False,
         help="Use multi-processing distributed training to launch "
@@ -249,8 +249,10 @@ def get_config():
                 default=argument.default,
                 help=argument.help,
             )
-    over_write_args_from_file(args, args.c)
     args = parser.parse_args()
+    over_write_args_from_file(args, args.c)
+    print(args.gpu)
+    print("dataset:",args.dataset)
     return args
 
 

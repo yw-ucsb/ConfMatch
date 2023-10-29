@@ -7,6 +7,13 @@ import torch.nn as nn
 import ruamel.yaml as yaml
 from torch.utils.tensorboard import SummaryWriter
 
+non_overwrite_args = [
+    'gpu',
+    'seed',
+    'save_name',
+    'data_dir',
+    'multiprocessing_distributed'
+]
 def over_write_args_from_dict(args, dict):
     """
     overwrite arguments according to the config file
@@ -24,7 +31,8 @@ def over_write_args_from_file(args, yml):
     with open(yml, 'r', encoding='utf-8') as f:
         dic = yaml.load(f.read(), Loader=yaml.Loader)
         for k in dic:
-            setattr(args, k, dic[k])
+            if k not in non_overwrite_args:
+                setattr(args, k, dic[k])
 
 
 def setattr_cls_from_kwargs(cls, kwargs):

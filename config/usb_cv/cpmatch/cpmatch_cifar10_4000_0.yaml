@@ -1,8 +1,8 @@
-algorithm: fixmatch
+algorithm: cpmatch
 save_dir: ./saved_models/usb_cv/
-save_name: fixmatch_cifar10_400_0
+save_name: cpmatch_cifar10_400_0
 resume: True
-load_path: ./saved_models/usb_cv//fixmatch_cifar10_400_0/latest_model.pth
+load_path: ./saved_models/usb_cv//cpmatch_cifar10_400_0/latest_model.pth
 overwrite: True
 use_tensorboard: True
 use_wandb: True
