@@ -7,10 +7,11 @@ import logging
 import random
 import torch
 import torch.distributed as dist
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader, random_split, Subset
 from semilearn.datasets import get_collactor, name2sampler
 from semilearn.nets.utils import param_groups_layer_decay, param_groups_weight_decay
-
+import numpy as np
+from math import floor
 def get_net_builder(net_name, from_name: bool):
     """
     built network according to network name
@@ -106,9 +107,27 @@ def get_dataset(args, algorithm, dataset, num_labels, num_classes, data_dir='./d
     
     # CpMatch algorithm: split labeled dataset： dataset_dict["train_lb"] --> dataset_dict["train_lb"], dataset_dict["cali"]
     if algorithm == 'cpmatch':
-        generator = torch.Generator().manual_seed(42)
-        lb_dset, ca_dset = random_split(lb_dset, [0.7, 0.3], generator=generator)
-        dataset_dict = {'train_lb': lb_dset, 'train_ulb': ulb_dset, 'eval': eval_dset, 'test': test_dset, 'cali':ca_dset}
+        # generator = torch.Generator().manual_seed(42)
+        # lb_dset, ca_dset = random_split(lb_dset, [0.7, 0.3], generator=generator)
+        label_per_class =num_labels // num_classes
+        label_per_class = floor(label_per_class*0.25)
+        if label_per_class == 0:
+            label_per_class = 1
+        labels = np.array(lb_dset.targets)
+
+
+        cali_idx = []
+        # unlabeled data: all training data
+        labeled_idx = np.array(range(len(labels))).tolist()
+        for i in range(args.num_classes):
+            idx = np.where(labels == i)[0]
+            idx = np.random.choice(idx, label_per_class, False)
+            cali_idx.extend(idx)
+        labeled_idx = [i for i in labeled_idx if i not in cali_idx]
+
+        ca_dset, lb_dset_new = Subset(lb_dset, cali_idx), Subset(lb_dset, labeled_idx)
+
+        dataset_dict = {'train_lb': lb_dset_new, 'train_ulb': ulb_dset, 'eval': eval_dset, 'test': test_dset, 'cali':ca_dset}
     else:
         dataset_dict = {'train_lb': lb_dset, 'train_ulb': ulb_dset, 'eval': eval_dset, 'test': test_dset}
         

@@ -86,13 +86,9 @@ class CpMatchThresholdingHook(MaskingHook):
     @torch.no_grad()
     def update(self, algorithm):
         algorithm.p_cutoff = self.selective_control(algorithm)
-    
+
     @torch.no_grad()
     def masking(self, algorithm, logits_x_ulb, softmax_x_ulb=True, *args, **kwargs):
-
-        # update the threshould: algorithm.p_cutoff
-        self.update(algorithm)
-
         if softmax_x_ulb:
             # probs_x_ulb = torch.softmax(logits_x_ulb.detach(), dim=-1)
             probs_x_ulb = algorithm.compute_prob(logits_x_ulb.detach())
@@ -102,3 +98,29 @@ class CpMatchThresholdingHook(MaskingHook):
         max_probs, _ = torch.max(probs_x_ulb, dim=-1)
         mask = max_probs.ge(algorithm.p_cutoff).to(max_probs.dtype)
         return mask
+
+
+    # @torch.no_grad()
+    # def masking(self, algorithm, logits_x_ulb, softmax_x_ulb=True, *args, **kwargs):
+
+    #     # update the threshould: algorithm.p_cutoff
+    #     self.update(algorithm)
+
+    #     if softmax_x_ulb:
+    #         # probs_x_ulb = torch.softmax(logits_x_ulb.detach(), dim=-1)
+    #         probs_x_ulb = algorithm.compute_prob(logits_x_ulb.detach())
+    #     else:
+    #         # logits is already probs
+    #         probs_x_ulb = logits_x_ulb.detach()
+    #     max_probs, _ = torch.max(probs_x_ulb, dim=-1)
+    #     mask = max_probs.ge(algorithm.p_cutoff).to(max_probs.dtype)
+    #     return mask
+
+    @torch.no_grad()
+    def before_train_step(self, algorithm, *args, **kwargs):
+
+        # update the threshould: algorithm.p_cutoff, every 50 iterations
+        if self.every_n_iters(algorithm, algorithm.num_log_iter) or algorithm.it == 0:
+            print(algorithm.num_log_iter, algorithm.it)
+            self.update(algorithm)
+
