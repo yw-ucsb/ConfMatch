@@ -12,7 +12,8 @@ non_overwrite_args = [
     'seed',
     'save_name',
     'data_dir',
-    'multiprocessing_distributed'
+    'multiprocessing_distributed',
+    'use_wandb',
 ]
 def over_write_args_from_dict(args, dict):
     """

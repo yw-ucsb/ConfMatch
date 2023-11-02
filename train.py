@@ -265,7 +265,6 @@ def main(args):
     assert (
         args.num_train_iter % args.epoch == 0
     ), f"# total training iter. {args.num_train_iter} is not divisible by # epochs {args.epoch}"  # noqa: E501
-
     save_path = os.path.join(args.save_dir, args.save_name)
     if os.path.exists(save_path) and args.overwrite and args.resume is False:
         import shutil
