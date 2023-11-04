@@ -3,7 +3,7 @@
 
 import torch
 from semilearn.core.algorithmbase import AlgorithmBase
-from semilearn.core.utils import ALGORITHMS
+from semilearn.core.utils import ALGORITHMS, get_data_loader
 from semilearn.algorithms.hooks import PseudoLabelingHook, FixedThresholdingHook
 from semilearn.algorithms.utils import SSL_Argument, str2bool
 from semilearn.algorithms.fixmatch import FixMatch
@@ -15,6 +15,10 @@ from semilearn.core.utils import (
     get_dataset,
     get_optimizer,
 )
+
+
+from torch.utils.data import DataLoader, random_split, Subset
+from semilearn.datasets import get_collactor, name2sampler, DistributedSampler
 
 @ALGORITHMS.register('cpmatch')
 class CpMatch(AlgorithmBase):
@@ -42,12 +46,53 @@ class CpMatch(AlgorithmBase):
         super().__init__(args, net_builder, tb_log, logger) 
         # fixmatch specified arguments
         self.init(T=args.T, p_cutoff=args.p_cutoff, hard_label=args.hard_label)
+
+        # Number of repeating loading of the whole calibration dataset;
+        # Expected effective number of calibration will be: len(dset_cali) * n_repeat_loader_cali;
+        self.n_repeat_loader_cali = 4
     
     def init(self, T, p_cutoff, hard_label=True):
         self.T = T
         self.p_cutoff = p_cutoff
         self.use_hard_label = hard_label
-    
+
+    def set_data_loader(self):
+        """
+        set loader_dict;
+        """
+        # Call Base class buildup;
+        loader_dict = super(AlgorithmBase).set_data_loader()
+
+        # CpMatch Loader;
+        # Loader that repeats loading the full calibration set for k times for expansion;
+        # Note that each loading will utilize different w augmentation; TODO: check RandCrop!
+
+        dset_cali = self.dataset_dict["cali"]
+        n_cali = len(dset_cali)
+
+        num_samples = self.n_repeat_loader_cali * n_cali
+
+        loader_cali = DataLoader(dset_cali, batch_size=n_cali, shuffle=False, num_workers=self.args.num_workers,
+                                 sampler=DistributedSampler(dset_cali, num_replicas=1, rank=0, num_samples=num_samples),
+                                 drop_last=False)
+
+        loader_dict["cali"] = loader_cali
+
+        # if self.args.algorithm == 'cpmatch':
+        #     loader_dict["cali"] = get_data_loader(
+        #         self.args,
+        #         self.dataset_dict["cali"],
+        #         batch_size=n_cali,
+        #         data_sampler='RandomSampler',
+        #         # num_iters=self.num_train_iter,
+        #         # num_epochs=self.epochs,
+        #         num_workers=self.args.num_workers,
+        #         # distributed=self.distributed,
+        #         drop_last=False,
+        #     )
+
+        return loader_dict
+
     def set_hooks(self):
         self.register_hook(PseudoLabelingHook(), "PseudoLabelingHook")
         self.register_hook(CpMatchThresholdingHook(alpha=0.1,delta=0.1), "ThresholdingHook")
