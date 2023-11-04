@@ -8,6 +8,13 @@ from semilearn.algorithms.hooks import PseudoLabelingHook, FixedThresholdingHook
 from semilearn.algorithms.utils import SSL_Argument, str2bool
 from semilearn.algorithms.fixmatch import FixMatch
 from .utils import CpMatchThresholdingHook
+from semilearn.core.utils import (
+    Bn_Controller,
+    get_cosine_schedule_with_warmup,
+    get_data_loader,
+    get_dataset,
+    get_optimizer,
+)
 
 @ALGORITHMS.register('cpmatch')
 class CpMatch(AlgorithmBase):
@@ -108,6 +115,97 @@ class CpMatch(AlgorithmBase):
                                          util_ratio=mask.float().mean().item())
         return out_dict, log_dict
         
+    def finetune(self):
+        self.print_fn("Create finetuning optimizer and scheduler")
+        # parameters = list(filter(lambda p: p.requires_grad, self.model.parameters()))
+        # freeze all layers but the last fc
+        if "vit" in self.args.net:
+            linear_keyword = 'head'
+        for name, param in self.model.named_parameters():
+            if name not in ['%s.weight' % linear_keyword, '%s.bias' % linear_keyword]:
+                param.requires_grad = False
+        self.optimizer = get_optimizer(
+            self.model,
+            'SGD',
+            0.001,
+            self.args.momentum,
+            0.1,
+            self.args.layer_decay,
+        )
+        epochs = 30
+        warmup_epochs = 4
+        per_epoch_steps = self.num_train_iter // self.epochs
+        total_iters = self.num_train_iter + per_epoch_steps * (epochs + warmup_epochs)
+        self.scheduler = get_cosine_schedule_with_warmup(
+            self.optimizer, 10*per_epoch_steps, num_warmup_steps=warmup_epochs*per_epoch_steps
+        )
+            
+        """
+        train function
+        """
+        self.model.train()
+        self.call_hook("before_run")
+        # print(self.dataset_dict.keys())
+        for epoch in range(self.start_epoch, self.epochs+epochs):
+            # self.epoch = epoch
+
+            # prevent the training iterations exceed args.num_train_iter
+            if self.it >= total_iters:
+                break
+
+            self.call_hook("before_train_epoch")
+
+            for data_lb in self.loader_dict["all_lb"]:
+                # prevent the training iterations exceed args.num_train_iter
+                if self.it >= total_iters:
+                    break
+
+                self.call_hook("before_train_step")
+                self.out_dict, self.log_dict = self.finetune_step(
+                    **self.process_batch(**data_lb)
+                )
+                self.call_hook("after_train_step")
+                self.it += 1
+
+            self.call_hook("after_train_epoch")
+
+        self.call_hook("after_run")
+
+    def finetune_step(self, x_lb, y_lb):
+
+        # inference and calculate sup/unsup losses
+        with self.amp_cm():
+            outs_x_lb = self.model(x_lb) 
+            logits_x_lb = outs_x_lb['logits']
+            feats_x_lb = outs_x_lb['feat']
+            feat_dict = {'x_lb':feats_x_lb}
+
+            sup_loss = self.ce_loss(logits_x_lb, y_lb, reduction='mean')
+            
+            total_loss = sup_loss 
+
+        out_dict = self.process_out_dict(loss=total_loss, feat=feat_dict)
+        log_dict = self.process_log_dict(sup_loss=sup_loss.item())
+    
+        return out_dict, log_dict
+    
+    def set_cali_optimizer(self):
+        """
+        set optimizer for algorithm
+        """
+        self.print_fn("Create optimizer and scheduler")
+        optimizer = get_optimizer(
+            self.model,
+            self.args.optim,
+            self.args.lr,
+            self.args.momentum,
+            self.args.weight_decay,
+            self.args.layer_decay,
+        )
+        scheduler = get_cosine_schedule_with_warmup(
+            optimizer, self.num_train_iter, num_warmup_steps=self.args.num_warmup_iter
+        )
+        return optimizer, scheduler
 
     @staticmethod
     def get_argument():

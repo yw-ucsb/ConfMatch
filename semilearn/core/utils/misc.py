@@ -14,6 +14,9 @@ non_overwrite_args = [
     'data_dir',
     'multiprocessing_distributed',
     'use_wandb',
+    'include_lb_to_ulb',
+    'save_dir',
+    'load_path',
 ]
 def over_write_args_from_dict(args, dict):
     """

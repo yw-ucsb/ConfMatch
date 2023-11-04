@@ -127,7 +127,7 @@ def get_dataset(args, algorithm, dataset, num_labels, num_classes, data_dir='./d
 
         ca_dset, lb_dset_new = Subset(lb_dset, cali_idx), Subset(lb_dset, labeled_idx)
 
-        dataset_dict = {'train_lb': lb_dset_new, 'train_ulb': ulb_dset, 'eval': eval_dset, 'test': test_dset, 'cali':ca_dset}
+        dataset_dict = {'train_lb': lb_dset_new, 'train_ulb': ulb_dset, 'eval': eval_dset, 'test': test_dset, 'cali':ca_dset, 'all_lb':lb_dset}
     else:
         dataset_dict = {'train_lb': lb_dset, 'train_ulb': ulb_dset, 'eval': eval_dset, 'test': test_dset}
         
@@ -206,7 +206,7 @@ def get_data_loader(args,
         raise Exception(f"unknown data sampler {data_sampler}.")
 
 
-def get_optimizer(net, optim_name='SGD', lr=0.1, momentum=0.9, weight_decay=0, layer_decay=1.0, nesterov=True, bn_wd_skip=True):
+def get_optimizer(net, optim_name='SGD', lr=0.1, momentum=0.9, weight_decay=0., layer_decay=1.0, nesterov=True, bn_wd_skip=True):
     '''
     return optimizer (name) in torch.optim.
 
