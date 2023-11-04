@@ -39,7 +39,7 @@ class CpMatchThresholdingHook(MaskingHook):
 
             smx = torch.nn.Softmax(dim=1)(o)
             y_pred = torch.argmax(smx, dim=1)
-            y_prob,_ = smx.max(axis=1)
+            y_prob, _ = smx.max(axis=1)
             cal_labels.append(y)
             cal_yhats.append(y_pred)
             cal_phats.append(y_prob)
