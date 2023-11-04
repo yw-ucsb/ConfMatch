@@ -1,13 +1,15 @@
 data_dir="/data/datasets/usb"
-load_path="./saved_models/usb_cv/cpmatch_cifar100_400_0_False/latest_model.pth"
-save_dir="./saved_models/usb_cv/cpmatch_cifar100_400_0_finetune/"
-gpu=7
+load_path="--load_path=./saved_models/usb_cv/cpmatch_cifar100_400_0_False/latest_model.pth"
+save_dir="--save_dir=./saved_models/usb_cv/cpmatch_cifar100_400_0_finetune/"
+save_dir="--save_dir=./saved_models/usb_cv/"
+load_path="--load_path=./saved_models/usb_cv/"
+gpu=2
 seeds=(0)
 dataset="cifar100_400"
 method="cpmatch"
-include_lb_to_ulb="True"
+include_lb_to_ulb="False"
 use_wandb=""
-# use_wandb="--use_wandb"
+use_wandb="--use_wandb"
 # method="fixmatch"
 # dataset="cifar100_300"
 for seed in "${seeds[@]}";do
@@ -20,8 +22,8 @@ python train.py --c config/usb_cv/${method}/${method}_${dataset}_0.yaml
 --multiprocessing_distributed=False
 $use_wandb
 --include_lb_to_ulb=$include_lb_to_ulb
---save_dir=$save_dir
---load_path=$load_path
+$save_dir
+$load_path
 "
 $cmd
 echo $cmd
