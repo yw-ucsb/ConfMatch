@@ -51,10 +51,10 @@ class CpMatch(AlgorithmBase):
 
     def set_data_loader(self):
         """
-        set loader_dict
+        set loader_dict;
         """
         # Call Base class buildup;
-        loader_dict = super().set_data_loader()
+        loader_dict = super(AlgorithmBase).set_data_loader()
 
         # CpMatch Loader;
         # Loader that repeats loading the full calibration set for k times for expansion;
