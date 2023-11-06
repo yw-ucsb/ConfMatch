@@ -7,11 +7,13 @@ import logging
 import random
 import torch
 import torch.distributed as dist
-from torch.utils.data import DataLoader, random_split, Subset
+from torch.utils.data import DataLoader, random_split, Subset, ConcatDataset
 from semilearn.datasets import get_collactor, name2sampler
 from semilearn.nets.utils import param_groups_layer_decay, param_groups_weight_decay
 import numpy as np
 from math import floor
+from torchvision import transforms
+from semilearn.datasets.augmentation import RandAugment, RandomResizedCropAndInterpolation
 def get_net_builder(net_name, from_name: bool):
     """
     built network according to network name
@@ -125,7 +127,30 @@ def get_dataset(args, algorithm, dataset, num_labels, num_classes, data_dir='./d
             cali_idx.extend(idx)
         labeled_idx = [i for i in labeled_idx if i not in cali_idx]
 
-        ca_dset, lb_dset_new = Subset(lb_dset, cali_idx), Subset(lb_dset, labeled_idx)
+        ca_dset, lb_dset_new =Subset(lb_dset, cali_idx), Subset(lb_dset, labeled_idx)
+        if args.confmatch_cali_s:
+            ca_dset_s = Subset(lb_dset, cali_idx)
+            assert ca_dset_s.dataset.strong_transform is not None
+            crop_size = args.img_size
+            crop_ratio = args.crop_ratio
+            mean, std = {}, {}
+            mean['cifar10'] = [0.485, 0.456, 0.406]
+            mean['cifar100'] = [x / 255 for x in [129.3, 124.1, 112.4]]
+            name = dataset
+
+            std['cifar10'] = [0.229, 0.224, 0.225]
+            std['cifar100'] = [x / 255 for x in [68.2, 65.4, 70.4]]
+
+            transform_cali = transforms.Compose([
+                transforms.Resize(crop_size),
+                transforms.RandomCrop(crop_size, padding=int(crop_size * (1 - crop_ratio)), padding_mode='reflect'),
+                transforms.RandomHorizontalFlip(),
+                RandAugment(10, 5),
+                transforms.ToTensor(),
+                transforms.Normalize(mean[name], std[name])
+            ])
+            ca_dset_s.dataset.transform = transform_cali
+            lb_dset_new = ConcatDataset([lb_dset_new, ca_dset_s])
 
         dataset_dict = {'train_lb': lb_dset_new, 'train_ulb': ulb_dset, 'eval': eval_dset, 'test': test_dset, 'cali':ca_dset, 'all_lb':lb_dset}
     else:

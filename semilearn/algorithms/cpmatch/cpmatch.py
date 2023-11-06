@@ -43,13 +43,17 @@ class CpMatch(AlgorithmBase):
                 If True, targets have [Batch size] shape with int values. If False, the target is vector
     """
     def __init__(self, args, net_builder, tb_log=None, logger=None):
+        self.n_repeat_loader_cali = args.n_repeat_loader_cali
+        self.alpha = args.confmatch_alpha
+        self.delta = args.confmatch_delta
+        self.gamma = args.confmatch_gamma
+        self.cal_error_rate = 0.
         super().__init__(args, net_builder, tb_log, logger) 
         # fixmatch specified arguments
         self.init(T=args.T, p_cutoff=args.p_cutoff, hard_label=args.hard_label)
 
         # Number of repeating loading of the whole calibration dataset;
         # Expected effective number of calibration will be: len(dset_cali) * n_repeat_loader_cali;
-        self.n_repeat_loader_cali = 4
     
     def init(self, T, p_cutoff, hard_label=True):
         self.T = T
@@ -61,7 +65,7 @@ class CpMatch(AlgorithmBase):
         set loader_dict;
         """
         # Call Base class buildup;
-        loader_dict = super(AlgorithmBase).set_data_loader()
+        loader_dict = super().set_data_loader()
 
         # CpMatch Loader;
         # Loader that repeats loading the full calibration set for k times for expansion;
@@ -77,6 +81,17 @@ class CpMatch(AlgorithmBase):
                                  drop_last=False)
 
         loader_dict["cali"] = loader_cali
+
+        loader_dict["all_lb"] = get_data_loader(
+            self.args,
+            self.dataset_dict["all_lb"],
+            64,
+            data_sampler=self.args.train_sampler,
+            num_iters=64*256,
+            num_epochs=64,
+            num_workers=self.args.num_workers,
+            distributed=self.distributed,
+        )
 
         # if self.args.algorithm == 'cpmatch':
         #     loader_dict["cali"] = get_data_loader(
@@ -95,7 +110,7 @@ class CpMatch(AlgorithmBase):
 
     def set_hooks(self):
         self.register_hook(PseudoLabelingHook(), "PseudoLabelingHook")
-        self.register_hook(CpMatchThresholdingHook(alpha=0.1,delta=0.1), "ThresholdingHook")
+        self.register_hook(CpMatchThresholdingHook(alpha=self.alpha,delta=self.delta, gamma=self.gamma), "ThresholdingHook")
         self.register_hook(FixedThresholdingHook(), "MaskingHook")
         super().set_hooks()
 
@@ -157,7 +172,11 @@ class CpMatch(AlgorithmBase):
         log_dict = self.process_log_dict(sup_loss=sup_loss.item(), 
                                          unsup_loss=unsup_loss.item(), 
                                          total_loss=total_loss.item(), 
-                                         util_ratio=mask.float().mean().item())
+                                         util_ratio=mask.float().mean().item(),
+                                         threshold=self.p_cutoff,
+                                         alpha=self.hooks_dict["ThresholdingHook"].cp_alpha,
+                                         cali_acc=1-self.cal_error_rate,
+                                         )
         return out_dict, log_dict
         
     def finetune(self):
@@ -234,24 +253,6 @@ class CpMatch(AlgorithmBase):
     
         return out_dict, log_dict
     
-    def set_cali_optimizer(self):
-        """
-        set optimizer for algorithm
-        """
-        self.print_fn("Create optimizer and scheduler")
-        optimizer = get_optimizer(
-            self.model,
-            self.args.optim,
-            self.args.lr,
-            self.args.momentum,
-            self.args.weight_decay,
-            self.args.layer_decay,
-        )
-        scheduler = get_cosine_schedule_with_warmup(
-            optimizer, self.num_train_iter, num_warmup_steps=self.args.num_warmup_iter
-        )
-        return optimizer, scheduler
-
     @staticmethod
     def get_argument():
         return [

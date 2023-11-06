@@ -12,10 +12,12 @@ class CpMatchThresholdingHook(MaskingHook):
     """
     Dynamic Threshold in CpMatch
     """
-    def __init__(self, alpha, delta, *args, **kwargs):
+    def __init__(self, alpha, delta, gamma, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.cp_alpha = alpha
         self.cp_delta = delta
+        self.gamma = gamma
+        self.cal_error_rate = 0.
 
     def selective_control(self, algorithm):
         lambdas = np.linspace(0,1,101)
@@ -67,7 +69,7 @@ class CpMatchThresholdingHook(MaskingHook):
         risks = np.array([selective_risk(lam) for lam in lambdas])
         # print(risks)
         risk_min = risks.min()
-        gamma = 0.5
+        gamma = self.gamma
         self.cp_alpha = gamma * cal_error_rate + (1-gamma) * risk_min
         # print(f'Cal Error:{100*cal_error_rate:.2f}%, min risk:{100*risk_min:.2f}%, alpha:{100*self.cp_alpha:.2f}')
         # Scan to choose lamabda hat
@@ -78,14 +80,15 @@ class CpMatchThresholdingHook(MaskingHook):
                 # print('risk: ',risk, lhat, lambdas.shape[0])
                 if risk > self.cp_alpha: 
                     print(f'Cal Error:{100*cal_error_rate:.2f}%, min risk:{100*risk_min:.2f}%, alpha:{100*self.cp_alpha:.2f}, threshold:{lhat:.2f}')
-                    return lhat.item()
+                    break
+            return lhat.item(), cal_error_rate
         except:
             print(f'Failed control. Cal Error:{100*cal_error_rate:.2f}%, min risk:{100*risk_min:.2f}%, alpha:{100*self.cp_alpha:.2f}, threshold:0.95')
-            return 0.95
+            return 0.95, cal_error_rate
     
     @torch.no_grad()
     def update(self, algorithm):
-        algorithm.p_cutoff = self.selective_control(algorithm)
+        algorithm.p_cutoff, algorithm.cal_error_rate = self.selective_control(algorithm)
 
     @torch.no_grad()
     def masking(self, algorithm, logits_x_ulb, softmax_x_ulb=True, *args, **kwargs):

@@ -224,6 +224,14 @@ def get_config():
         "fastest way to use PyTorch for either single node or "
         "multi node data parallel training",
     )
+
+    # ConfMatch specific arguments
+    parser.add_argument("--n_repeat_loader_cali", default=5, type=int, help="repeat x times of weak argumentation for calibration data")
+    parser.add_argument("--confmatch_alpha", default=.1, type=float, help="hyper-parameter: error rate")
+    parser.add_argument("--confmatch_delta", default=.1, type=float, help="hyper-parameter: failure rate")
+    parser.add_argument("--confmatch_gamma", default=.5, type=float, help="hyper-parameter: weight of cali PL accuracy")
+    parser.add_argument("--confmatch_cali_s", default=False, type=bool, help="Strong argumented calibration data for training")
+
     # config file
     parser.add_argument("--c", type=str, default="")
 
@@ -253,6 +261,7 @@ def get_config():
     over_write_args_from_file(args, args.c)
     print(args.gpu)
     print("dataset:",args.dataset)
+    print(args.confmatch_cali_s)
     return args
 
 
@@ -399,6 +408,7 @@ def main_worker(gpu, ngpus_per_node, args):
 
     if hasattr(model, "finetune"):
         logger.info("Finetune stage")
+        model.save_path = os.path.join(model.save_path, 'fine_tune')
         model.finetune()
         # print validation (and test results)
         for key, item in model.results_dict.items():

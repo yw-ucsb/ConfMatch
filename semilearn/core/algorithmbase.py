@@ -182,29 +182,6 @@ class AlgorithmBase:
             distributed=self.distributed,
         )
         
-        # CpMatch algorithm: 
-        if self.args.algorithm == 'cpmatch':
-            loader_dict["cali"] = get_data_loader(
-                self.args,
-                self.dataset_dict["cali"],
-                self.args.eval_batch_size,
-                data_sampler=None,
-                # num_iters=self.num_train_iter,
-                # num_epochs=self.epochs,
-                num_workers=self.args.num_workers,
-                # distributed=self.distributed,
-                drop_last=False,
-            )
-            loader_dict["all_lb"] = get_data_loader(
-                self.args,
-                self.dataset_dict["all_lb"],
-                64,
-                data_sampler=self.args.train_sampler,
-                num_iters=34*256,
-                num_epochs=34,
-                num_workers=self.args.num_workers,
-                distributed=self.distributed,
-            )
 
 
         loader_dict["train_ulb"] = get_data_loader(
