@@ -51,8 +51,9 @@ class WANDBHook(Hook):
         if self.every_n_iters(algorithm, algorithm.num_log_iter):
             log_dict = {}
             for key, item in algorithm.log_dict.items():
-                if key in self.log_key_list:
-                    log_dict[key] = item
+                log_dict[key] = item
+                # if key in self.log_key_list:
+                #     log_dict[key] = item
             self.run.log(log_dict, step=algorithm.it)
     
         if self.every_n_iters(algorithm, algorithm.num_eval_iter):

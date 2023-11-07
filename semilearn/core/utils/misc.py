@@ -17,6 +17,7 @@ non_overwrite_args = [
     'include_lb_to_ulb',
     'save_dir',
     'load_path',
+    'eval_batch_size',
 ]
 def over_write_args_from_dict(args, dict):
     """

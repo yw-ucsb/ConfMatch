@@ -2,6 +2,9 @@
 # Licensed under the MIT License.
 
 import torch
+from torch.nn import LayerNorm
+import torch.nn.functional as F
+import numpy as np
 from semilearn.core.algorithmbase import AlgorithmBase
 from semilearn.core.utils import ALGORITHMS, get_data_loader
 from semilearn.algorithms.hooks import PseudoLabelingHook, FixedThresholdingHook
@@ -15,7 +18,6 @@ from semilearn.core.utils import (
     get_dataset,
     get_optimizer,
 )
-
 
 from torch.utils.data import DataLoader, random_split, Subset
 from semilearn.datasets import get_collactor, name2sampler, DistributedSampler
@@ -48,6 +50,11 @@ class CpMatch(AlgorithmBase):
         self.delta = args.confmatch_delta
         self.gamma = args.confmatch_gamma
         self.cal_error_rate = 0.
+        self.ft_warm_up = 16
+        self.ft_epochs = 128
+        self.cf_mat = torch.zeros((2,2))
+        self.conf_loss = args.conf_loss
+        self.lambda_conf = args.lambda_conf
         super().__init__(args, net_builder, tb_log, logger) 
         # fixmatch specified arguments
         self.init(T=args.T, p_cutoff=args.p_cutoff, hard_label=args.hard_label)
@@ -87,8 +94,8 @@ class CpMatch(AlgorithmBase):
             self.dataset_dict["all_lb"],
             64,
             data_sampler=self.args.train_sampler,
-            num_iters=64*256,
-            num_epochs=64,
+            num_iters=(self.ft_warm_up+self.ft_epochs)*256,
+            num_epochs=self.ft_warm_up+self.ft_epochs,
             num_workers=self.args.num_workers,
             distributed=self.distributed,
         )
@@ -113,6 +120,26 @@ class CpMatch(AlgorithmBase):
         self.register_hook(CpMatchThresholdingHook(alpha=self.alpha,delta=self.delta, gamma=self.gamma), "ThresholdingHook")
         self.register_hook(FixedThresholdingHook(), "MaskingHook")
         super().set_hooks()
+
+
+    def cpmatch_contrastive_loss(self, x_lb, y_lb, T=0.2):
+        # embedding similarity
+        n = x_lb.shape[0]
+        I = torch.eye(n, device=x_lb.device)
+        
+        x_lb_normed = F.normalize(x_lb, p=2,dim=1)
+        sim = torch.mm(x_lb_normed, x_lb_normed.t())
+        # sim_probs = sim / sim.sum(1, keepdim=True)
+        idx_col, idx_row = torch.meshgrid(y_lb, y_lb)
+        M = self.cf_mat[idx_row,idx_col]
+        # contrastive loss
+        
+        loss =  -(sim * M/2).sum()
+        for i in range(n-1):
+            for j in range(i+1,n):
+                if y_lb[i] == y_lb[j]:
+                    loss = loss + sim[i,j]
+        return loss
 
     def train_step(self, x_lb, y_lb, x_ulb_w, x_ulb_s):
         num_lb = y_lb.shape[0]
@@ -165,12 +192,16 @@ class CpMatch(AlgorithmBase):
                                                pseudo_label,
                                                'ce',
                                                mask=mask)
-
-            total_loss = sup_loss + self.lambda_u * unsup_loss
+            if self.conf_loss:
+                conf_loss = self.cpmatch_contrastive_loss(feats_x_lb, y_lb)
+            else:
+                conf_loss = torch.tensor(0.,device = x_lb.device)
+            total_loss = sup_loss + self.lambda_u * unsup_loss + self.lambda_conf *  conf_loss
 
         out_dict = self.process_out_dict(loss=total_loss, feat=feat_dict)
         log_dict = self.process_log_dict(sup_loss=sup_loss.item(), 
                                          unsup_loss=unsup_loss.item(), 
+                                         conf_loss=conf_loss.item(),
                                          total_loss=total_loss.item(), 
                                          util_ratio=mask.float().mean().item(),
                                          threshold=self.p_cutoff,
@@ -196,8 +227,8 @@ class CpMatch(AlgorithmBase):
             0.1,
             self.args.layer_decay,
         )
-        epochs = 30
-        warmup_epochs = 4
+        epochs = self.ft_epochs
+        warmup_epochs = self.ft_warm_up
         per_epoch_steps = self.num_train_iter // self.epochs
         total_iters = self.num_train_iter + per_epoch_steps * (epochs + warmup_epochs)
         self.scheduler = get_cosine_schedule_with_warmup(

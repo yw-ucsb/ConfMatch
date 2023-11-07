@@ -7,6 +7,7 @@ import numpy as np
 from semilearn.algorithms.hooks import MaskingHook
 from scipy.optimize import brentq
 from scipy.stats import binom
+from sklearn.metrics import confusion_matrix
 
 class CpMatchThresholdingHook(MaskingHook):
     """
@@ -56,6 +57,10 @@ class CpMatchThresholdingHook(MaskingHook):
         # Compute calibration error rate
         cal_error_rate = (cal_labels != cal_yhats).mean()
 
+        # Compute confusion matrix
+        cf_mat = confusion_matrix(cal_labels, cal_yhats, normalize="true")
+        cf_mat = torch.tensor(cf_mat).cuda(gpu)
+
         # Define selective risk
         def selective_risk(lam): return (cal_yhats[cal_phats >= lam] != cal_labels[cal_phats >= lam]).sum()/(cal_phats >= lam).sum()
         def nlambda(lam): return (cal_phats > lam).sum()
@@ -81,14 +86,14 @@ class CpMatchThresholdingHook(MaskingHook):
                 if risk > self.cp_alpha: 
                     print(f'Cal Error:{100*cal_error_rate:.2f}%, min risk:{100*risk_min:.2f}%, alpha:{100*self.cp_alpha:.2f}, threshold:{lhat:.2f}')
                     break
-            return lhat.item(), cal_error_rate
+            return lhat.item(), cal_error_rate, cf_mat
         except:
             print(f'Failed control. Cal Error:{100*cal_error_rate:.2f}%, min risk:{100*risk_min:.2f}%, alpha:{100*self.cp_alpha:.2f}, threshold:0.95')
-            return 0.95, cal_error_rate
+            return 0.95, cal_error_rate, cf_mat
     
     @torch.no_grad()
     def update(self, algorithm):
-        algorithm.p_cutoff, algorithm.cal_error_rate = self.selective_control(algorithm)
+        algorithm.p_cutoff, algorithm.cal_error_rate, algorithm.cf_mat = self.selective_control(algorithm)
 
     @torch.no_grad()
     def masking(self, algorithm, logits_x_ulb, softmax_x_ulb=True, *args, **kwargs):
@@ -123,7 +128,7 @@ class CpMatchThresholdingHook(MaskingHook):
     def before_train_step(self, algorithm, *args, **kwargs):
 
         # update the threshould: algorithm.p_cutoff, every 50 iterations
-        if self.every_n_iters(algorithm, algorithm.num_log_iter) or algorithm.it == 0:
+        if (self.every_n_iters(algorithm, algorithm.num_log_iter) or algorithm.it == 0) and algorithm.it <algorithm.num_train_iter:
             print(algorithm.num_log_iter, algorithm.it)
             self.update(algorithm)
 

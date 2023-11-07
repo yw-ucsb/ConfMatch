@@ -231,6 +231,8 @@ def get_config():
     parser.add_argument("--confmatch_delta", default=.1, type=float, help="hyper-parameter: failure rate")
     parser.add_argument("--confmatch_gamma", default=.5, type=float, help="hyper-parameter: weight of cali PL accuracy")
     parser.add_argument("--confmatch_cali_s", default=False, type=bool, help="Strong argumented calibration data for training")
+    parser.add_argument("--conf_loss", default=False, type=bool, help="Confusion matrix loss")
+    parser.add_argument("--lambda_conf", default=1.0, type=float, help="Confusion matrix loss")
 
     # config file
     parser.add_argument("--c", type=str, default="")
@@ -262,6 +264,7 @@ def get_config():
     print(args.gpu)
     print("dataset:",args.dataset)
     print(args.confmatch_cali_s)
+    print(args.lambda_conf, args.confmatch_gamma, args.conf_loss)
     return args
 
 
@@ -407,8 +410,15 @@ def main_worker(gpu, ngpus_per_node, args):
         logger.info(f"Model result - {key} : {item}")
 
     if hasattr(model, "finetune"):
+        args.save_name = os.path.join(args.save_name, 'fine_tune')
+        save_path = os.path.join(args.save_dir, args.save_name)
+        if os.path.exists(save_path) and args.overwrite and args.resume is False:
+            import shutil
+
+            shutil.rmtree(save_path)
+        model.save_name = args.save_name
+        logger = get_logger(args.save_name, save_path, logger_level)
         logger.info("Finetune stage")
-        model.save_path = os.path.join(model.save_path, 'fine_tune')
         model.finetune()
         # print validation (and test results)
         for key, item in model.results_dict.items():
