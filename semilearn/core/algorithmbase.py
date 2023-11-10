@@ -327,6 +327,7 @@ class AlgorithmBase:
         return torch.softmax(logits, dim=-1)
 
     def train_step(self, idx_lb, x_lb, y_lb, idx_ulb, x_ulb_w, x_ulb_s):
+    # def train_step(self, *args, **kwargs):
         """
         train_step specific to each algorithm
         """
