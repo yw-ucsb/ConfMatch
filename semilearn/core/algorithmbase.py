@@ -181,8 +181,6 @@ class AlgorithmBase:
             num_workers=self.args.num_workers,
             distributed=self.distributed,
         )
-        
-
 
         loader_dict["train_ulb"] = get_data_loader(
             self.args,
