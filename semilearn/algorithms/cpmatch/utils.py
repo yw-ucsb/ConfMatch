@@ -4,10 +4,12 @@
 
 import torch
 import numpy as np
+import loralib as lora
 from semilearn.algorithms.hooks import MaskingHook
 from scipy.optimize import brentq
 from scipy.stats import binom
 from sklearn.metrics import confusion_matrix
+
 
 class CpMatchThresholdingHook(MaskingHook):
     """
@@ -131,4 +133,17 @@ class CpMatchThresholdingHook(MaskingHook):
         if (self.every_n_iters(algorithm, algorithm.num_log_iter) or algorithm.it == 0) and algorithm.it <algorithm.num_train_iter:
             print(algorithm.num_log_iter, algorithm.it)
             self.update(algorithm)
+
+
+def create_lora_vit(model, r=8):
+    # Find attention layers in vit and replace the q, v with lora linear layer;
+    # Note USB implements qkv with a single linear layer;
+    # In USB, attention layers are marked as sel.blocks[i].attn.qkv;
+    n_feat = model.num_features
+    n_classes = model.num_classes
+    for block in model.blocks:
+        block.attn.qkv = lora.MergedLinear(n_feat, 3*n_feat, r=r, enable_lora=[True, False, True])
+
+    # Find the final head and replace with lora linear layers;
+    model.head = lora.Linear(n_feat, n_classes)
 

@@ -2,6 +2,7 @@
 # Licensed under the MIT License.
 
 import torch
+import loralib as lora
 from torch.nn import LayerNorm
 import torch.nn.functional as F
 import numpy as np
@@ -10,7 +11,7 @@ from semilearn.core.utils import ALGORITHMS, get_data_loader
 from semilearn.algorithms.hooks import PseudoLabelingHook, FixedThresholdingHook
 from semilearn.algorithms.utils import SSL_Argument, str2bool
 from semilearn.algorithms.fixmatch import FixMatch
-from .utils import CpMatchThresholdingHook
+from .utils import CpMatchThresholdingHook, create_lora_vit
 from semilearn.core.utils import (
     Bn_Controller,
     get_cosine_schedule_with_warmup,
@@ -32,6 +33,7 @@ from sklearn.metrics import (
 )
 from torchmetrics.classification import MulticlassAccuracy
 
+
 @ALGORITHMS.register('cpmatch')
 class CpMatch(AlgorithmBase):
     def __init__(self, args, net_builder, tb_log=None, logger=None):
@@ -50,7 +52,7 @@ class CpMatch(AlgorithmBase):
         super().__init__(args, net_builder, tb_log, logger)
 
         self.top5_metric = MulticlassAccuracy(num_classes=args.num_classes, top_k=5)
-        # fixmatch specified arguments;
+        # Fixmatch specified arguments;
         self.init(T=args.T, p_cutoff=args.p_cutoff, hard_label=args.hard_label)
     
     def init(self, T, p_cutoff, hard_label=True):
@@ -196,6 +198,15 @@ class CpMatch(AlgorithmBase):
         return out_dict, log_dict
         
     def finetune(self):
+        # Fine-tuning trained model with Lora;
+
+        create_lora_vit(self.model)
+        lora.mark_only_lora_as_trainable(self.model)
+
+
+
+
+
         self.print_fn("Create finetuning optimizer and scheduler")
         # parameters = list(filter(lambda p: p.requires_grad, self.model.parameters()))
         # freeze all layers but the last fc
@@ -216,6 +227,8 @@ class CpMatch(AlgorithmBase):
         warmup_epochs = self.ft_warm_up
         per_epoch_steps = self.num_train_iter // self.epochs
         total_iters = self.num_train_iter + per_epoch_steps * (epochs + warmup_epochs)
+
+
         self.scheduler = get_cosine_schedule_with_warmup(
             self.optimizer, 10*per_epoch_steps, num_warmup_steps=warmup_epochs*per_epoch_steps
         )
