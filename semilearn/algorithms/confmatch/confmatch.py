@@ -11,7 +11,7 @@ from semilearn.core.utils import ALGORITHMS, get_data_loader
 from semilearn.algorithms.hooks import PseudoLabelingHook, FixedThresholdingHook
 from semilearn.algorithms.utils import SSL_Argument, str2bool
 from semilearn.algorithms.fixmatch import FixMatch
-from .utils import CpMatchThresholdingHook, create_lora_vit
+from .utils import ConfMatchThresholdingHook, create_lora_vit
 from semilearn.core.utils import (
     Bn_Controller,
     get_cosine_schedule_with_warmup,
@@ -34,15 +34,15 @@ from sklearn.metrics import (
 from torchmetrics.classification import MulticlassAccuracy
 
 
-class CpBase(AlgorithmBase):
+class ConfBase(AlgorithmBase):
     """
     New base from AlgorithmBase with support of finetuning;
     """
     def __init__(self, args, net_builder, tb_log, logger):
-        super(CpBase, self).__init__(args, net_builder, tb_log, logger)
+        super().__init__(args, net_builder, tb_log, logger)
         # Setup finetuning related arguments here; TODO: Make sure the start / end epoch / iterations are correctly configured;
         self.ft_start_epoch = args.epoch
-        self.ft_epochs = args.ft_epochs
+        self.ft_epoch = args.ft_epoch
         self.num_ft_iter = args.num_ft_iter
 
         self.total_iter = self.num_train_iter + args.num_ft_iter
@@ -76,7 +76,7 @@ class CpBase(AlgorithmBase):
         self.model.train()
         self.call_hook("before_run")
         # print(self.dataset_dict.keys())
-        for epoch in range(self.start_epoch, self.ft_start_epoch + self.ft_epochs):
+        for epoch in range(self.ft_start_epoch, self.ft_start_epoch + self.ft_epoch):
             # self.epoch = epoch
 
             # prevent the training iterations exceed args.num_train_iter
@@ -100,7 +100,6 @@ class CpBase(AlgorithmBase):
             self.call_hook("after_train_epoch")
 
         self.call_hook("after_run")
-        # TODO: chech if this finetuned model overwrites the previous model;
 
     def finetune_step(self, x_lb, y_lb):
         # Fintuning is done with CE loss on all labeled data;
@@ -120,39 +119,33 @@ class CpBase(AlgorithmBase):
         return out_dict, log_dict
 
 
-@ALGORITHMS.register('cpmatch')
-class CpMatch(CpBase):
+@ALGORITHMS.register('confmatch')
+class ConfMatch(ConfBase):
     def __init__(self, args, net_builder, tb_log=None, logger=None):
-        super().__init__(args, net_builder, tb_log, logger)
-        # Fixmatch specified arguments;
-        self.init(T=args.T, p_cutoff=args.p_cutoff, hard_label=args.hard_label)
-        # ConfMatch specified arguments;
-        # Number of repeating loading of the whole calibration dataset;
-        # Expected effective number of calibration will be: len(dset_cali) * n_repeat_loader_cali;
+        # Initialized algorithm specified arguments;
+        # This has to be before super method since dataloader creation requires n_repeat_loader_cali arg;
+        self.T = args.T
+        self.p_cutoff = args.p_cutoff
+        self.use_hard_label = args.hard_label
         self.n_repeat_loader_cali = args.n_repeat_loader_cali
         self.alpha = args.confmatch_alpha
         self.delta = args.confmatch_delta
         self.gamma = args.confmatch_gamma
         self.cal_error_rate = 0.
-        self.ft_warm_up = 16
-        self.ft_epochs = 128
-        self.cf_mat = torch.zeros((2, 2)) # TODO: modify this if bs_u is changed;
+        self.cf_mat = torch.zeros((2, 2))  # TODO: modify this if bs_u is changed;
         self.conf_loss = args.conf_loss
         self.lambda_conf = args.lambda_conf
+
         self.top5_metric = MulticlassAccuracy(num_classes=args.num_classes, top_k=5)
 
-    
-    def init(self, T, p_cutoff, hard_label=True):
-        self.T = T
-        self.p_cutoff = p_cutoff
-        self.use_hard_label = hard_label
+        super().__init__(args, net_builder, tb_log, logger)
 
     def set_data_loader(self):
         """
         set loader_dict;
         """
         # Call Base class buildup;
-        loader_dict = super().set_data_loader()
+        loader_dict = AlgorithmBase.set_data_loader(self)
 
         # CpMatch Loader;
         # Loader that repeats loading the full calibration set for k times for expansion;
@@ -169,13 +162,15 @@ class CpMatch(CpBase):
 
         loader_dict["cali"] = loader_cali
 
-        loader_dict["all_lb"] = get_data_loader(
+        dset_ft = self.dataset_dict["ft"]
+
+        loader_dict["ft"] = get_data_loader(
             self.args,
-            self.dataset_dict["all_lb"],
-            64,
+            self.dataset_dict["ft"],
+            self.args.ft_batch_size,
             data_sampler=self.args.train_sampler,
-            num_iters=(self.ft_warm_up+self.ft_epochs)*256,
-            num_epochs=self.ft_warm_up+self.ft_epochs,
+            num_iters=self.args.num_ft_iter,
+            num_epochs=self.args.ft_epoch,
             num_workers=self.args.num_workers,
             distributed=self.distributed,
         )
@@ -184,7 +179,7 @@ class CpMatch(CpBase):
 
     def set_hooks(self):
         self.register_hook(PseudoLabelingHook(), "PseudoLabelingHook")
-        self.register_hook(CpMatchThresholdingHook(alpha=self.alpha,delta=self.delta, gamma=self.gamma), "ThresholdingHook")
+        self.register_hook(ConfMatchThresholdingHook(alpha=self.alpha, delta=self.delta, gamma=self.gamma), "ThresholdingHook")
         self.register_hook(FixedThresholdingHook(), "MaskingHook")
         super().set_hooks()
 
@@ -360,9 +355,25 @@ class CpMatch(CpBase):
     @staticmethod
     def get_argument():
         return [
+            # FixMatch required arguments;
             SSL_Argument('--hard_label', str2bool, True),
             SSL_Argument('--T', float, 0.5),
             SSL_Argument('--p_cutoff', float, 0.95),
+            # ConfMatch specified arguments;
+            # Risk control related arguments;
+            SSL_Argument("--n_repeat_loader_cali", default=5, type=int,
+                         help="repeat x times of weak argumentation for calibration data"),
+            SSL_Argument("--confmatch_alpha", default=.1, type=float, help="hyper-parameter: error rate"),
+            SSL_Argument("--confmatch_delta", default=.1, type=float, help="hyper-parameter: failure rate"),
+            SSL_Argument("--confmatch_gamma", default=.5, type=float,
+                         help="hyper-parameter: weight of cali PL accuracy"),
+            # Confusion matrix related arguments;
+            SSL_Argument("--conf_loss", default=False, type=bool, help="Confusion matrix loss"),
+            SSL_Argument("--lambda_conf", default=1.0, type=float, help="Weight of confusion matrix loss"),
+
+            # Archived;
+            SSL_Argument("--confmatch_cali_s", default=False, type=bool,
+                         help="Strong argumented calibration data for training"),
         ]
 
     # def create_finetune_setup(self):

@@ -36,8 +36,8 @@ def over_write_args_from_file(args, yml):
     with open(yml, 'r', encoding='utf-8') as f:
         dic = yaml.load(f.read(), Loader=yaml.Loader)
         for k in dic:
-            if k not in non_overwrite_args:
-                setattr(args, k, dic[k])
+            # if k not in non_overwrite_args:
+            setattr(args, k, dic[k])
 
 
 def setattr_cls_from_kwargs(cls, kwargs):

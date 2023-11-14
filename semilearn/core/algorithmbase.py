@@ -144,7 +144,7 @@ class AlgorithmBase:
             return dataset_dict
 
         # CpMatch algorithm: 
-        if self.args.algorithm == 'cpmatch':
+        if self.args.algorithm == 'confmatch':
             self.args.cali_dest_len = len(dataset_dict["cali"])
         
         self.args.ulb_dest_len = (

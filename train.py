@@ -225,17 +225,34 @@ def get_config():
         "multi node data parallel training",
     )
 
-    # ConfMatch specific arguments
-    parser.add_argument("--n_repeat_loader_cali", default=5, type=int, help="repeat x times of weak argumentation for calibration data")
-    parser.add_argument("--confmatch_alpha", default=.1, type=float, help="hyper-parameter: error rate")
-    parser.add_argument("--confmatch_delta", default=.1, type=float, help="hyper-parameter: failure rate")
-    parser.add_argument("--confmatch_gamma", default=.5, type=float, help="hyper-parameter: weight of cali PL accuracy")
-    parser.add_argument("--confmatch_cali_s", default=False, type=bool, help="Strong argumented calibration data for training")
-    parser.add_argument("--conf_loss", default=False, type=bool, help="Confusion matrix loss")
-    parser.add_argument("--lambda_conf", default=1.0, type=float, help="Confusion matrix loss")
+    """
+    Finetuning arguments;
+    """
+    parser.add_argument("--ft_optim", type=str, default="SGD")
+    parser.add_argument("--ft_lr", type=float, default=3e-2)
+    parser.add_argument("--ft_momentum", type=float, default=0.9)
+    parser.add_argument("--ft_weight_decay", type=float, default=5e-4)
+    parser.add_argument(
+        "--ft_layer_decay",
+        type=float,
+        default=1.0,
+        help="layer-wise learning rate decay, default to 1.0 which means no layer "
+             "decay",
+    )
+    parser.add_argument("--ft_epoch", type=int, default=1)
+    parser.add_argument(
+        "--_num_ft_iter",
+        type=int,
+        default=20,
+        help="total number of training iterations",
+    )
+    parser.add_argument(
+        "--ft_num_warmup_iter", type=int, default=0, help="cosine linear warmup iterations"
+    )
+    parser.add_argument("-ft_bsz", "--ft_batch_size", type=int, default=64)
 
     # config file
-    parser.add_argument("--c", type=str, default="")
+    parser.add_argument("--c", type=str)
 
     # add algorithm specific parameters
     args = parser.parse_args()
@@ -261,10 +278,10 @@ def get_config():
             )
     args = parser.parse_args()
     over_write_args_from_file(args, args.c)
-    print(args.gpu)
-    print("dataset:",args.dataset)
-    print(args.confmatch_cali_s)
-    print(args.lambda_conf, args.confmatch_gamma, args.conf_loss)
+    # print(args.gpu)
+    # print("dataset:", args.dataset)
+    # print(args.confmatch_cali_s)
+    # print(args.lambda_conf, args.confmatch_gamma, args.conf_loss)
     return args
 
 

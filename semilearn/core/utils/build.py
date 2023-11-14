@@ -108,7 +108,7 @@ def get_dataset(args, algorithm, dataset, num_labels, num_classes, data_dir='./d
         return None
     
     # CpMatch algorithm: split labeled dataset： dataset_dict["train_lb"] --> dataset_dict["train_lb"], dataset_dict["cali"]
-    if algorithm == 'cpmatch':
+    if algorithm == 'confmatch':
         # generator = torch.Generator().manual_seed(42)
         # lb_dset, ca_dset = random_split(lb_dset, [0.7, 0.3], generator=generator)
         label_per_class =num_labels // num_classes
@@ -127,7 +127,7 @@ def get_dataset(args, algorithm, dataset, num_labels, num_classes, data_dir='./d
             cali_idx.extend(idx)
         labeled_idx = [i for i in labeled_idx if i not in cali_idx]
 
-        ca_dset, lb_dset_new =Subset(lb_dset, cali_idx), Subset(lb_dset, labeled_idx)
+        ca_dset, lb_dset_new = Subset(lb_dset, cali_idx), Subset(lb_dset, labeled_idx)
         if args.confmatch_cali_s:
             ca_dset_s = Subset(lb_dset, cali_idx)
             assert ca_dset_s.dataset.strong_transform is not None
@@ -152,7 +152,8 @@ def get_dataset(args, algorithm, dataset, num_labels, num_classes, data_dir='./d
             ca_dset_s.dataset.transform = transform_cali
             lb_dset_new = ConcatDataset([lb_dset_new, ca_dset_s])
 
-        dataset_dict = {'train_lb': lb_dset_new, 'train_ulb': ulb_dset, 'eval': eval_dset, 'test': test_dset, 'cali':ca_dset, 'all_lb':lb_dset}
+        dataset_dict = {'train_lb': lb_dset_new, 'train_ulb': ulb_dset, 'eval': eval_dset, 'test': test_dset,
+                        'cali': ca_dset, 'ft': lb_dset}
     else:
         dataset_dict = {'train_lb': lb_dset, 'train_ulb': ulb_dset, 'eval': eval_dset, 'test': test_dset}
         

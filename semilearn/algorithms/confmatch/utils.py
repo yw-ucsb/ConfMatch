@@ -11,7 +11,7 @@ from scipy.stats import binom
 from sklearn.metrics import confusion_matrix
 
 
-class CpMatchThresholdingHook(MaskingHook):
+class ConfMatchThresholdingHook(MaskingHook):
     """
     Dynamic Threshold in CpMatch
     """
@@ -23,7 +23,7 @@ class CpMatchThresholdingHook(MaskingHook):
         self.cal_error_rate = 0.
 
     def selective_control(self, algorithm):
-        lambdas = np.linspace(0,1,101)
+        lambdas = np.linspace(0, 1, 101)
         model = algorithm.model
         cp_loader = algorithm.loader_dict["cali"]
         cal_labels = []
