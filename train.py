@@ -409,6 +409,7 @@ def main_worker(gpu, ngpus_per_node, args):
     for key, item in model.results_dict.items():
         logger.info(f"Model result - {key} : {item}")
 
+    # Finetuning and final testing;
     if hasattr(model, "finetune"):
         args.save_name = os.path.join(args.save_name, 'fine_tune')
         save_path = os.path.join(args.save_dir, args.save_name)

@@ -34,9 +34,99 @@ from sklearn.metrics import (
 from torchmetrics.classification import MulticlassAccuracy
 
 
+class CpBase(AlgorithmBase):
+    """
+    New base from AlgorithmBase with support of finetuning;
+    """
+    def __init__(self, args, net_builder, tb_log, logger):
+        super(CpBase, self).__init__(args, net_builder, tb_log, logger)
+        # Setup finetuning related arguments here; TODO: Make sure the start / end epoch / iterations are correctly configured;
+        self.ft_start_epoch = args.epoch
+        self.ft_epochs = args.ft_epochs
+        self.num_ft_iter = args.num_ft_iter
+
+        self.total_iter = self.num_train_iter + args.num_ft_iter
+
+    def set_finetuning(self):
+        """
+        Set finetuning model with LORA and corresponding optimizer, scheduler;
+        """
+        self.print_fn("Create fine-tuning model, optimizer and scheduler...")
+        create_lora_vit(self.model)
+        lora.mark_only_lora_as_trainable(self.model)
+        optimizer = get_optimizer(
+            self.model,
+            self.args.ft_optim,
+            self.args.ft_lr,
+            self.args.ft_momentum,
+            self.args.ft_weight_decay,
+            self.args.ft_layer_decay,
+        )
+        scheduler = get_cosine_schedule_with_warmup(
+            optimizer, self.args.ft_num_train_iter, num_warmup_steps=self.args.ft_num_warmup_iter
+        )
+
+        return optimizer, scheduler
+
+    def finetune(self):
+        """
+        Finetuning logs will be appended to the end of the training;
+        TODO: Make sure the start / end epoch / iterations are correctly configured;
+        """
+        self.model.train()
+        self.call_hook("before_run")
+        # print(self.dataset_dict.keys())
+        for epoch in range(self.start_epoch, self.ft_start_epoch + self.ft_epochs):
+            # self.epoch = epoch
+
+            # prevent the training iterations exceed args.num_train_iter
+            if self.it >= self.total_iter:
+                break
+
+            self.call_hook("before_train_epoch")
+
+            for data_lb in self.loader_dict["all_lb"]:
+                # prevent the training iterations exceed total_iter;
+                if self.it >= self.total_iter:
+                    break
+
+                self.call_hook("before_train_step")
+                self.out_dict, self.log_dict = self.finetune_step(
+                    **self.process_batch(**data_lb)
+                )
+                self.call_hook("after_train_step")
+                self.it += 1
+
+            self.call_hook("after_train_epoch")
+
+        self.call_hook("after_run")
+        # TODO: chech if this finetuned model overwrites the previous model;
+
+    def finetune_step(self, x_lb, y_lb):
+        # Fintuning is done with CE loss on all labeled data;
+        with self.amp_cm():
+            outs_x_lb = self.model(x_lb)
+            logits_x_lb = outs_x_lb['logits']
+            feats_x_lb = outs_x_lb['feat']
+            feat_dict = {'x_lb': feats_x_lb}
+
+            sup_loss = self.ce_loss(logits_x_lb, y_lb, reduction='mean')
+
+            total_loss = sup_loss
+
+        out_dict = self.process_out_dict(loss=total_loss, feat=feat_dict)
+        log_dict = self.process_log_dict(sup_loss=sup_loss.item())
+
+        return out_dict, log_dict
+
+
 @ALGORITHMS.register('cpmatch')
-class CpMatch(AlgorithmBase):
+class CpMatch(CpBase):
     def __init__(self, args, net_builder, tb_log=None, logger=None):
+        super().__init__(args, net_builder, tb_log, logger)
+        # Fixmatch specified arguments;
+        self.init(T=args.T, p_cutoff=args.p_cutoff, hard_label=args.hard_label)
+        # ConfMatch specified arguments;
         # Number of repeating loading of the whole calibration dataset;
         # Expected effective number of calibration will be: len(dset_cali) * n_repeat_loader_cali;
         self.n_repeat_loader_cali = args.n_repeat_loader_cali
@@ -46,14 +136,11 @@ class CpMatch(AlgorithmBase):
         self.cal_error_rate = 0.
         self.ft_warm_up = 16
         self.ft_epochs = 128
-        self.cf_mat = torch.zeros((2, 2))
+        self.cf_mat = torch.zeros((2, 2)) # TODO: modify this if bs_u is changed;
         self.conf_loss = args.conf_loss
         self.lambda_conf = args.lambda_conf
-        super().__init__(args, net_builder, tb_log, logger)
-
         self.top5_metric = MulticlassAccuracy(num_classes=args.num_classes, top_k=5)
-        # Fixmatch specified arguments;
-        self.init(T=args.T, p_cutoff=args.p_cutoff, hard_label=args.hard_label)
+
     
     def init(self, T, p_cutoff, hard_label=True):
         self.T = T
@@ -196,91 +283,6 @@ class CpMatch(AlgorithmBase):
                                          ulb_select_top1=ulb_select_top1.item(),
                                          )
         return out_dict, log_dict
-        
-    def finetune(self):
-        # Fine-tuning trained model with Lora;
-
-        create_lora_vit(self.model)
-        lora.mark_only_lora_as_trainable(self.model)
-
-
-
-
-
-        self.print_fn("Create finetuning optimizer and scheduler")
-        # parameters = list(filter(lambda p: p.requires_grad, self.model.parameters()))
-        # freeze all layers but the last fc
-        if "vit" in self.args.net:
-            linear_keyword = 'head'
-        for name, param in self.model.named_parameters():
-            if name not in ['%s.weight' % linear_keyword, '%s.bias' % linear_keyword]:
-                param.requires_grad = False
-        self.optimizer = get_optimizer(
-            self.model,
-            'SGD',
-            0.001,
-            self.args.momentum,
-            0.1,
-            self.args.layer_decay,
-        )
-        epochs = self.ft_epochs
-        warmup_epochs = self.ft_warm_up
-        per_epoch_steps = self.num_train_iter // self.epochs
-        total_iters = self.num_train_iter + per_epoch_steps * (epochs + warmup_epochs)
-
-
-        self.scheduler = get_cosine_schedule_with_warmup(
-            self.optimizer, 10*per_epoch_steps, num_warmup_steps=warmup_epochs*per_epoch_steps
-        )
-            
-        """
-        train function
-        """
-        self.model.train()
-        self.call_hook("before_run")
-        # print(self.dataset_dict.keys())
-        for epoch in range(self.start_epoch, self.epochs+epochs):
-            # self.epoch = epoch
-
-            # prevent the training iterations exceed args.num_train_iter
-            if self.it >= total_iters:
-                break
-
-            self.call_hook("before_train_epoch")
-
-            for data_lb in self.loader_dict["all_lb"]:
-                # prevent the training iterations exceed args.num_train_iter
-                if self.it >= total_iters:
-                    break
-
-                self.call_hook("before_train_step")
-                self.out_dict, self.log_dict = self.finetune_step(
-                    **self.process_batch(**data_lb)
-                )
-                self.call_hook("after_train_step")
-                self.it += 1
-
-            self.call_hook("after_train_epoch")
-
-        self.call_hook("after_run")
-
-    def finetune_step(self, x_lb, y_lb):
-
-        # inference and calculate sup/unsup losses
-        with self.amp_cm():
-            outs_x_lb = self.model(x_lb) 
-            logits_x_lb = outs_x_lb['logits']
-            feats_x_lb = outs_x_lb['feat']
-            feat_dict = {'x_lb': feats_x_lb}
-
-            sup_loss = self.ce_loss(logits_x_lb, y_lb, reduction='mean')
-            
-            total_loss = sup_loss 
-
-        out_dict = self.process_out_dict(loss=total_loss, feat=feat_dict)
-        log_dict = self.process_log_dict(sup_loss=sup_loss.item())
-    
-        return out_dict, log_dict
 
     def evaluate(self, eval_dest="eval", out_key="logits", return_logits=False):
         """
@@ -362,3 +364,28 @@ class CpMatch(AlgorithmBase):
             SSL_Argument('--T', float, 0.5),
             SSL_Argument('--p_cutoff', float, 0.95),
         ]
+
+    # def create_finetune_setup(self):
+    #     # Fine-tuning trained model with Lora;
+    #     # This will replace the model, optimizer and scheduler, be sure to save states since they will be overwritten;
+    #     self.print_fn("Create fine-tuning optimizer and scheduler...")
+    #
+    #     create_lora_vit(self.model)
+    #     lora.mark_only_lora_as_trainable(self.model)
+    #     # Configure optimizer; TODO: add separate lr, scheduler, decay for different layers;
+    #     self.optimizer = get_optimizer(
+    #         self.model,
+    #         'SGD',
+    #         0.001,
+    #         self.args.momentum,
+    #         0.1,
+    #         self.args.layer_decay,
+    #     )
+    #     epochs = self.ft_epochs
+    #     warmup_epochs = self.ft_warm_up
+    #     per_epoch_steps = self.num_train_iter // self.epochs
+    #     total_iters = self.num_train_iter + per_epoch_steps * (epochs + warmup_epochs)
+    #
+    #     self.scheduler = get_cosine_schedule_with_warmup(
+    #         self.optimizer, 10 * per_epoch_steps, num_warmup_steps=warmup_epochs * per_epoch_steps
+    #     )
