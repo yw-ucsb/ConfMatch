@@ -437,6 +437,8 @@ def main_worker(gpu, ngpus_per_node, args):
         model.save_name = args.save_name
         logger = get_logger(args.save_name, save_path, logger_level)
         logger.info("Finetune stage")
+        model.set_finetuning()
+        model.model = send_model_cuda(args, model.model)
         model.finetune()
         # print validation (and test results)
         for key, item in model.results_dict.items():

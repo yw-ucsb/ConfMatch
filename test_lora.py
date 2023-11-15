@@ -1,172 +1,331 @@
 
-import loralib as lora
+import argparse
 import logging
+import os
+import random
+import warnings
+
+import numpy as np
 import torch
-from torch import nn
-from torch.nn import functional as F
-from semilearn.nets import vit_small_patch2_32
-import math
+import torch.backends.cudnn as cudnn
+import torch.distributed as dist
+import torch.multiprocessing as mp
+import torch.nn.parallel
+from semilearn.algorithms import get_algorithm, name2alg
+from semilearn.core.utils import (
+    TBLog,
+    count_parameters,
+    get_logger,
+    get_net_builder,
+    get_port,
+    over_write_args_from_file,
+    send_model_cuda,
+)
+from semilearn.imb_algorithms import get_imb_algorithm, name2imbalg
 
 
-vit = vit_small_patch2_32(num_classes=100, pretrained=True, pretrained_path='https://github.com/microsoft/Semi-supervised-learning/releases/download/v.0.0.0/vit_small_patch2_32_mlp_im_1k_32.pth')
+def get_config():
+    from semilearn.algorithms.utils import str2bool
 
+    parser = argparse.ArgumentParser(description="Semi-Supervised Learning (USB)")
 
-
-def create_lora_vit(model, r=8):
-    # Find attention layers in vit and replace the q, v with lora linear layer;
-    # Note USB implements qkv with a single linear layer;
-    # In USB, attention layers are marked as sel.blocks[i].attn.qkv;
-    n_feat = model.num_features
-    n_classes = model.num_classes
-    for block in model.blocks:
-        block.attn.qkv = lora.MergedLinear(n_feat, 3*n_feat, r=r, enable_lora=[True, False, True])
-
-    # Find the final head and replace with lora linear layers;
-    model.head = lora.Linear(n_feat, n_classes)
-    pass
-
-
-def find_module(root_module: nn.Module, key: str):
     """
-    Find a module with a specific name in a Transformer model
-    From OpenDelta https://github.com/thunlp/OpenDelta
+    Saving & loading of the model.
     """
-    sub_keys = key.split(".")
-    parent_module = root_module
-    for sub_key in sub_keys[:-1]:
-        parent_module = getattr(parent_module, sub_key)
-    module = getattr(parent_module, sub_keys[-1])
-    return parent_module, sub_keys[-1], module
+    parser.add_argument("--save_dir", type=str, default="./saved_models")
+    parser.add_argument("-sn", "--save_name", type=str, default="fixmatch")
+    parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--load_path", type=str)
+    parser.add_argument("-o", "--overwrite", action="store_true", default=True)
+    parser.add_argument(
+        "--use_tensorboard",
+        action="store_true",
+        help="Use tensorboard to plot and save curves",
+    )
+    parser.add_argument(
+        "--use_wandb", action="store_true", help="Use wandb to plot and save curves"
+    )
+    parser.add_argument(
+        "--use_aim", action="store_true", help="Use aim to plot and save curves"
+    )
 
-
-class LoRALinear(nn.Linear):
     """
-    LoRA implemented in a dense layer
-    From https://github.com/microsoft/LoRA/blob/main/loralib/layers.py
+    Training Configuration of FixMatch
+    """
+    parser.add_argument("--epoch", type=int, default=1)
+    parser.add_argument(
+        "--num_train_iter",
+        type=int,
+        default=20,
+        help="total number of training iterations",
+    )
+    parser.add_argument(
+        "--num_warmup_iter", type=int, default=0, help="cosine linear warmup iterations"
+    )
+    parser.add_argument(
+        "--num_eval_iter", type=int, default=10, help="evaluation frequency"
+    )
+    parser.add_argument("--num_log_iter", type=int, default=5, help="logging frequency")
+    parser.add_argument("-nl", "--num_labels", type=int, default=400)
+    parser.add_argument("-bsz", "--batch_size", type=int, default=8)
+    parser.add_argument(
+        "--uratio",
+        type=int,
+        default=1,
+        help="the ratio of unlabeled data to labeled data in each mini-batch",
+    )
+    parser.add_argument(
+        "--eval_batch_size",
+        type=int,
+        default=16,
+        help="batch size of evaluation data loader (it does not affect the accuracy)",
+    )
+    parser.add_argument(
+        "--ema_m", type=float, default=0.999, help="ema momentum for eval_model"
+    )
+    parser.add_argument("--ulb_loss_ratio", type=float, default=1.0)
+
+    """
+    Optimizer configurations
+    """
+    parser.add_argument("--optim", type=str, default="SGD")
+    parser.add_argument("--lr", type=float, default=3e-2)
+    parser.add_argument("--momentum", type=float, default=0.9)
+    parser.add_argument("--weight_decay", type=float, default=5e-4)
+    parser.add_argument(
+        "--layer_decay",
+        type=float,
+        default=1.0,
+        help="layer-wise learning rate decay, default to 1.0 which means no layer "
+        "decay",
+    )
+
+    """
+    Backbone Net Configurations
+    """
+    parser.add_argument("--net", type=str, default="wrn_28_2")
+    parser.add_argument("--net_from_name", type=str2bool, default=False)
+    parser.add_argument("--use_pretrain", default=False, type=str2bool)
+    parser.add_argument("--pretrain_path", default="", type=str)
+
+    """
+    Algorithms Configurations
     """
 
-    def __init__(
-            self,
-            in_features: int,
-            out_features: int,
-            r: int = 0,
-            lora_alpha: int = 1,
-            lora_dropout: float = 0.,
-            fan_in_fan_out: bool = False,
-            # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
-            merge_weights: bool = False,
-            # Not sure if this will affect saving/loading models so just set it to be False
-            **kwargs
-    ):
-        nn.Linear.__init__(self, in_features, out_features, **kwargs)
+    ## core algorithm setting
+    parser.add_argument(
+        "-alg", "--algorithm", type=str, default="fixmatch", help="ssl algorithm"
+    )
+    parser.add_argument(
+        "--use_cat", type=str2bool, default=True, help="use cat operation in algorithms"
+    )
+    parser.add_argument(
+        "--amp",
+        type=str2bool,
+        default=False,
+        help="use mixed precision training or not",
+    )
+    parser.add_argument("--clip_grad", type=float, default=0)
 
-        self.r = r
-        self.lora_alpha = lora_alpha
-        # Optional dropout
-        if lora_dropout > 0.:
-            self.lora_dropout = nn.Dropout(p=lora_dropout)
-        else:
-            self.lora_dropout = lambda x: x
-        # Mark the weight as unmerged
-        self.merged = False
-        self.merge_weights = merge_weights
-        self.fan_in_fan_out = fan_in_fan_out
-        # Actual trainable parameters
-        if r > 0:
-            self.lora_A = nn.Parameter(self.weight.new_zeros((r, in_features)))
-            self.lora_B = nn.Parameter(self.weight.new_zeros((out_features, r)))
-            self.scaling = self.lora_alpha / self.r
-            # Freezing the pre-trained weight matrix
-            self.weight.requires_grad = False
-        self.reset_parameters()
-        if fan_in_fan_out:
-            self.weight.data = self.weight.data.transpose(0, 1)
+    ## imbalance algorithm setting
+    parser.add_argument(
+        "-imb_alg",
+        "--imb_algorithm",
+        type=str,
+        default=None,
+        help="imbalance ssl algorithm",
+    )
 
-    def reset_parameters(self):
-        nn.Linear.reset_parameters(self)
-        if hasattr(self, 'lora_A'):
-            # initialize A the same way as the default for nn.Linear and B to zero
-            nn.init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
-            nn.init.zeros_(self.lora_B)
+    """
+    Data Configurations
+    """
 
-    def train(self, mode: bool = True):
-        def T(w):
-            return w.transpose(0, 1) if self.fan_in_fan_out else w
+    ## standard setting configurations
+    parser.add_argument("--data_dir", type=str, default="./data")
+    parser.add_argument("-ds", "--dataset", type=str, default="cifar10")
+    parser.add_argument("-nc", "--num_classes", type=int, default=10)
+    parser.add_argument("--train_sampler", type=str, default="RandomSampler")
+    parser.add_argument("--num_workers", type=int, default=1)
+    parser.add_argument(
+        "--include_lb_to_ulb",
+        type=str2bool,
+        default="True",
+        help="flag of including labeled data into unlabeled data, default to True",
+    )
 
-        nn.Linear.train(self, mode)
-        if mode:
-            if self.merge_weights and self.merged:
-                # Make sure that the weights are not merged
-                if self.r > 0:
-                    self.weight.data -= T(self.lora_B @ self.lora_A) * self.scaling
-                self.merged = False
-        else:
-            if self.merge_weights and not self.merged:
-                # Merge the weights and mark it
-                if self.r > 0:
-                    self.weight.data += T(self.lora_B @ self.lora_A) * self.scaling
-                self.merged = True
+    ## imbalanced setting arguments
+    parser.add_argument(
+        "--lb_imb_ratio",
+        type=int,
+        default=1,
+        help="imbalance ratio of labeled data, default to 1",
+    )
+    parser.add_argument(
+        "--ulb_imb_ratio",
+        type=int,
+        default=1,
+        help="imbalance ratio of unlabeled data, default to 1",
+    )
+    parser.add_argument(
+        "--ulb_num_labels",
+        type=int,
+        default=None,
+        help="number of labels for unlabeled data, used for determining the maximum "
+        "number of labels in imbalanced setting",
+    )
 
-    def forward(self, x: torch.Tensor):
-        def T(w):
-            return w.transpose(0, 1) if self.fan_in_fan_out else w
+    ## cv dataset arguments
+    parser.add_argument("--img_size", type=int, default=32)
+    parser.add_argument("--crop_ratio", type=float, default=0.875)
 
-        if self.r > 0 and not self.merged:
-            result = F.linear(x, T(self.weight), bias=self.bias)
-            if self.r > 0:
-                result += (self.lora_dropout(x) @ self.lora_A.transpose(0, 1) @ self.lora_B.transpose(0,
-                                                                                                      1)) * self.scaling
-            return result
-        else:
-            return F.linear(x, T(self.weight), bias=self.bias)
+    ## nlp dataset arguments
+    parser.add_argument("--max_length", type=int, default=512)
+
+    ## speech dataset algorithms
+    parser.add_argument("--max_length_seconds", type=float, default=4.0)
+    parser.add_argument("--sample_rate", type=int, default=16000)
+
+    """
+    multi-GPUs & Distributed Training
+    """
+
+    ## args for distributed training (from https://github.com/pytorch/examples/blob/master/imagenet/main.py)  # noqa: E501
+    parser.add_argument(
+        "--world-size",
+        default=1,
+        type=int,
+        help="number of nodes for distributed training",
+    )
+    parser.add_argument(
+        "--rank", default=0, type=int, help="**node rank** for distributed training"
+    )
+    parser.add_argument(
+        "-du",
+        "--dist-url",
+        default="tcp://127.0.0.1:11111",
+        type=str,
+        help="url used to set up distributed training",
+    )
+    parser.add_argument(
+        "--dist-backend", default="nccl", type=str, help="distributed backend"
+    )
+    parser.add_argument(
+        "--seed", default=1, type=int, help="seed for initializing training. "
+    )
+    parser.add_argument("--gpu", default=None, type=int, help="GPU id to use.")
+    parser.add_argument(
+        "--multiprocessing_distributed",
+        type=str2bool,
+        default=False,
+        help="Use multi-processing distributed training to launch "
+        "N processes per node, which has N GPUs. This is the "
+        "fastest way to use PyTorch for either single node or "
+        "multi node data parallel training",
+    )
+
+    """
+    Finetuning arguments;
+    """
+    parser.add_argument("--ft_optim", type=str, default="SGD")
+    parser.add_argument("--ft_lr", type=float, default=3e-2)
+    parser.add_argument("--ft_momentum", type=float, default=0.9)
+    parser.add_argument("--ft_weight_decay", type=float, default=5e-4)
+    parser.add_argument(
+        "--ft_layer_decay",
+        type=float,
+        default=1.0,
+        help="layer-wise learning rate decay, default to 1.0 which means no layer "
+             "decay",
+    )
+    parser.add_argument("--ft_epoch", type=int, default=1)
+    parser.add_argument(
+        "--_num_ft_iter",
+        type=int,
+        default=20,
+        help="total number of training iterations",
+    )
+    parser.add_argument(
+        "--ft_num_warmup_iter", type=int, default=0, help="cosine linear warmup iterations"
+    )
+    parser.add_argument("-ft_bsz", "--ft_batch_size", type=int, default=64)
+
+    # config file
+    parser.add_argument("--c", type=str, default='./test_lora_config.yaml')
+
+    # add algorithm specific parameters
+    args = parser.parse_args()
+    over_write_args_from_file(args, args.c)
+    for argument in name2alg[args.algorithm].get_argument():
+        parser.add_argument(
+            argument.name,
+            type=argument.type,
+            default=argument.default,
+            help=argument.help,
+        )
+
+    # add imbalanced algorithm specific parameters
+    args = parser.parse_args()
+    over_write_args_from_file(args, args.c)
+    if args.imb_algorithm is not None:
+        for argument in name2imbalg[args.imb_algorithm].get_argument():
+            parser.add_argument(
+                argument.name,
+                type=argument.type,
+                default=argument.default,
+                help=argument.help,
+            )
+    args = parser.parse_args()
+    over_write_args_from_file(args, args.c)
+    # print(args.gpu)
+    # print("dataset:", args.dataset)
+    # print(args.confmatch_cali_s)
+    # print(args.lambda_conf, args.confmatch_gamma, args.conf_loss)
+    return args
 
 
-class LoRA:
+def create_model(args):
+    args.distributed = args.world_size > 1 or args.multiprocessing_distributed
+    # SET save_path and logger
+    save_path = os.path.join(args.save_dir, args.save_name)
+    logger_level = "WARNING"
+    tb_log = None
 
-    def __init__(self, model, r, alpha, float16):
-        """
-        Input:
-        r, alpha: LoRA hyperparameters
-        float16: Whether the model parameters are float16 or not
-        """
+    logger = get_logger(args.save_name, save_path, logger_level)
+    _net_builder = get_net_builder(args.net, args.net_from_name)
 
-        self.model = model
-        self.hidden_dim = model.config.hidden_size
-        self.float16 = float16
+    model = get_algorithm(args, _net_builder, tb_log, logger)
 
-        if model.config.model_type == "opt":
-            attention_name = "attn"
-        elif model.config.model_type == "roberta":
-            attention_name = "attention"
-        else:
-            raise NotImplementedError
+    # SET Devices for (Distributed) DataParallel
+    model.model = send_model_cuda(args, model.model)
+    model.ema_model = send_model_cuda(args, model.ema_model, clip_batch=False)
 
-        # Insert LoRA
-        for key, _ in model.named_modules():
-            if key[-len(attention_name):] == attention_name:
-                logger.info(f"Inject lora to: {key}")
-                _, _, attn = find_module(model, key)
+    return model
 
-                if model.config.model_type == "opt":
-                    original_q_weight = attn.q_proj.weight.data
-                    original_q_bias = attn.q_proj.bias.data
-                    original_v_weight = attn.v_proj.weight.data
-                    original_v_bias = attn.v_proj.bias.data
-                    attn.q_proj = LoRALinear(model.config.hidden_size, model.config.hidden_size, r=r, lora_alpha=alpha,
-                                             bias=model.config.enable_bias).to(original_q_weight.device)
-                    attn.v_proj = LoRALinear(model.config.hidden_size, model.config.hidden_size, r=r, lora_alpha=alpha,
-                                             bias=model.config.enable_bias).to(original_v_weight.device)
-                    if float16:
-                        attn.q_proj.half()
-                        attn.v_proj.half()
-                    attn.q_proj.weight.data = original_q_weight
-                    attn.q_proj.bias.data = original_q_bias
-                    attn.v_proj.weight.data = original_v_weight
-                    attn.v_proj.bias.data = original_v_bias
-                else:
-                    raise NotImplementedError
 
-        # Freeze non-LoRA parameters
-        for n, p in model.named_parameters():
-            if "lora" not in n:
-                p.requires_grad = False
+
+if __name__ == '__main__':
+    # Create args for the model, note to specify resume and load path;
+    args = get_config()
+
+
+    # Create model and load vanilla model;
+    model = create_model(args=args)
+    saved_model = torch.load('/home/y_yin/SSL-Benchmark-USB/saved_models/usb_cv/cpmatch/cifar100_400_0_True_0.1_0.1_1.00_cali5_confTrue_0.001/latest_model.pth')
+    model.model.load_state_dict(saved_model['model'])
+    model.ema_model.load_state_dict(saved_model['ema_model'])
+    model.it = saved_model['it']
+    model.start_epoch = saved_model['epoch']
+    model.epoch = saved_model['epoch']
+    # Test the evaluation function;
+    # Not in this code, ema is not initialized with hook before the run, so we set an additional if else in evaluate();
+    # This should be removed after testing lora;
+    # eval_dict_vanilla = model.evaluate()
+    # Test the lora finetuning function;
+    logging.info('Finetuning model with Lora...')
+    model.set_finetuning()
+    model.model = send_model_cuda(args, model.model)
+    model.finetune()
+    # Test the final performance after finetuning;
+    logging.info('Test Lora finetuned model...')
+    eval_dict_vanilla = model.evaluate()
+

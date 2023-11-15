@@ -10,6 +10,7 @@ from scipy.optimize import brentq
 from scipy.stats import binom
 from sklearn.metrics import confusion_matrix
 
+from semilearn.core.utils import ALGORITHMS, get_data_loader, send_model_cuda
 
 class ConfMatchThresholdingHook(MaskingHook):
     """
@@ -66,9 +67,9 @@ class ConfMatchThresholdingHook(MaskingHook):
         # Define selective risk
         def selective_risk(lam): return (cal_yhats[cal_phats >= lam] != cal_labels[cal_phats >= lam]).sum()/(cal_phats >= lam).sum()
         def nlambda(lam): return (cal_phats > lam).sum()
-        def invert_for_ub(r,lam): return binom.cdf(selective_risk(lam)*nlambda(lam),nlambda(lam),r)-self.cp_delta
+        def invert_for_ub(r,lam): return binom.cdf(selective_risk(lam)*nlambda(lam), nlambda(lam), r)-self.cp_delta
         # Construct upper boud
-        def selective_risk_ub(lam): return brentq(invert_for_ub,0,0.9999,args=(lam,))
+        def selective_risk_ub(lam): return brentq(invert_for_ub, 0, 0.9999, args=(lam,))
 
         # Compute the smallest risk
         lambdas = np.array([lam for lam in lambdas if nlambda(lam) >= 10]) # Make sure there's some data in the top bin.
@@ -135,15 +136,27 @@ class ConfMatchThresholdingHook(MaskingHook):
             self.update(algorithm)
 
 
-def create_lora_vit(model, r=8):
+def create_lora_ft_vit(args, model, r=4):
     # Find attention layers in vit and replace the q, v with lora linear layer;
     # Note USB implements qkv with a single linear layer;
     # In USB, attention layers are marked as sel.blocks[i].attn.qkv;
     n_feat = model.num_features
     n_classes = model.num_classes
-    for block in model.blocks:
-        block.attn.qkv = lora.MergedLinear(n_feat, 3*n_feat, r=r, enable_lora=[True, False, True])
+    # for block in model.blocks:
+    #     block.attn.qkv = lora.MergedLinear(n_feat, 3*n_feat, r=r, enable_lora=[True, False, True])
 
     # Find the final head and replace with lora linear layers;
-    model.head = lora.Linear(n_feat, n_classes)
+    model.head = lora.Linear(n_feat, n_classes, r=r)
+    # Setup trainable parameters;
+    lora.mark_only_lora_as_trainable(model)
+    # Send model to devices;
+    model = send_model_cuda(args, model)
+
+    return model
+
+
+def create_vanilla_ft_vit(model):
+    for name, param in model.named_parameters():
+        if name not in ['%s.weight' % 'head', '%s.bias' % 'head']:
+            param.requires_grad = False
 

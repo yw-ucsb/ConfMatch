@@ -7,11 +7,11 @@ from torch.nn import LayerNorm
 import torch.nn.functional as F
 import numpy as np
 from semilearn.core.algorithmbase import AlgorithmBase
-from semilearn.core.utils import ALGORITHMS, get_data_loader
+from semilearn.core.utils import ALGORITHMS, get_data_loader, send_model_cuda
 from semilearn.algorithms.hooks import PseudoLabelingHook, FixedThresholdingHook
 from semilearn.algorithms.utils import SSL_Argument, str2bool
 from semilearn.algorithms.fixmatch import FixMatch
-from .utils import ConfMatchThresholdingHook, create_lora_vit
+from .utils import ConfMatchThresholdingHook, create_lora_ft_vit, create_vanilla_ft_vit
 from semilearn.core.utils import (
     Bn_Controller,
     get_cosine_schedule_with_warmup,
@@ -32,6 +32,7 @@ from sklearn.metrics import (
     recall_score,
 )
 from torchmetrics.classification import MulticlassAccuracy
+from tqdm import tqdm
 
 
 class ConfBase(AlgorithmBase):
@@ -41,20 +42,27 @@ class ConfBase(AlgorithmBase):
     def __init__(self, args, net_builder, tb_log, logger):
         super().__init__(args, net_builder, tb_log, logger)
         # Setup finetuning related arguments here; TODO: Make sure the start / end epoch / iterations are correctly configured;
+        self.status = None
         self.ft_start_epoch = args.epoch
         self.ft_epoch = args.ft_epoch
         self.num_ft_iter = args.num_ft_iter
+        self.ft_num_warmup_iter = args.ft_num_warmup_iter
 
         self.total_iter = self.num_train_iter + args.num_ft_iter
 
     def set_finetuning(self):
         """
-        Set finetuning model with LORA and corresponding optimizer, scheduler;
+        Set up finetuning model with LORA and corresponding optimizer, scheduler;
+        Note: this will completely overwrite the original optimizer and scheduler used during the training phase,
+        save before doing so!
         """
         self.print_fn("Create fine-tuning model, optimizer and scheduler...")
-        create_lora_vit(self.model)
-        lora.mark_only_lora_as_trainable(self.model)
-        optimizer = get_optimizer(
+        # Create Lora model;
+        self.model = create_lora_ft_vit(self.args, self.model)
+
+        # create_vanilla_ft_vit(self.model)
+
+        self.optimizer = get_optimizer(
             self.model,
             self.args.ft_optim,
             self.args.ft_lr,
@@ -62,22 +70,24 @@ class ConfBase(AlgorithmBase):
             self.args.ft_weight_decay,
             self.args.ft_layer_decay,
         )
-        scheduler = get_cosine_schedule_with_warmup(
-            optimizer, self.args.ft_num_train_iter, num_warmup_steps=self.args.ft_num_warmup_iter
+        self.scheduler = get_cosine_schedule_with_warmup(
+            self.optimizer, self.args.num_ft_iter, num_warmup_steps=self.ft_num_warmup_iter
         )
 
-        return optimizer, scheduler
 
     def finetune(self):
         """
         Finetuning logs will be appended to the end of the training;
-        TODO: Make sure the start / end epoch / iterations are correctly configured;
         """
+        self.set_finetuning()
+
         self.model.train()
         self.call_hook("before_run")
-        # print(self.dataset_dict.keys())
-        for epoch in range(self.ft_start_epoch, self.ft_start_epoch + self.ft_epoch):
-            # self.epoch = epoch
+        # Disable EMA by resetting ema to None to avoid update;
+        self.ema = None
+
+        for epoch in tqdm(range(self.ft_start_epoch, self.ft_start_epoch + self.ft_epoch)):
+            self.epoch = epoch
 
             # prevent the training iterations exceed args.num_train_iter
             if self.it >= self.total_iter:
@@ -85,7 +95,7 @@ class ConfBase(AlgorithmBase):
 
             self.call_hook("before_train_epoch")
 
-            for data_lb in self.loader_dict["all_lb"]:
+            for data_lb in self.loader_dict["ft"]:
                 # prevent the training iterations exceed total_iter;
                 if self.it >= self.total_iter:
                     break
@@ -161,8 +171,6 @@ class ConfMatch(ConfBase):
                                  drop_last=False)
 
         loader_dict["cali"] = loader_cali
-
-        dset_ft = self.dataset_dict["ft"]
 
         loader_dict["ft"] = get_data_loader(
             self.args,
@@ -284,7 +292,8 @@ class ConfMatch(ConfBase):
         evaluation function
         """
         self.model.eval()
-        self.ema.apply_shadow()
+        if self.ema is not None:
+            self.ema.apply_shadow()
 
         eval_loader = self.loader_dict[eval_dest]
         total_loss = 0.0
@@ -334,9 +343,11 @@ class ConfMatch(ConfBase):
         self.print_fn("confusion matrix:\n" + np.array_str(cf_mat))
 
         # Other metrics we want to monitor;
-        top5 = self.acc_metric(torch.tensor(y_logits), torch.tensor(y_true)).item()
+        top5 = self.top5_metric(torch.tensor(y_logits), torch.tensor(y_true)).item()
 
-        self.ema.restore()
+        if self.ema is not None:
+            self.ema.restore()
+
         self.model.train()
 
         eval_dict = {
