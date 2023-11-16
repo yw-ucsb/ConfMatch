@@ -136,17 +136,17 @@ class ConfMatchThresholdingHook(MaskingHook):
             self.update(algorithm)
 
 
-def create_lora_ft_vit(args, model, r=4):
+def create_lora_ft_vit(args, model, r=8):
     # Find attention layers in vit and replace the q, v with lora linear layer;
     # Note USB implements qkv with a single linear layer;
     # In USB, attention layers are marked as sel.blocks[i].attn.qkv;
     n_feat = model.num_features
     n_classes = model.num_classes
-    # for block in model.blocks:
-    #     block.attn.qkv = lora.MergedLinear(n_feat, 3*n_feat, r=r, enable_lora=[True, False, True])
+    for block in model.blocks:
+        block.attn.qkv = lora.MergedLinear(n_feat, 3*n_feat, r=r, enable_lora=[True, False, True])
 
     # Find the final head and replace with lora linear layers;
-    model.head = lora.Linear(n_feat, n_classes, r=r)
+    # model.head = lora.Linear(n_feat, n_classes, r=r)
     # Setup trainable parameters;
     lora.mark_only_lora_as_trainable(model)
     # Send model to devices;

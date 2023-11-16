@@ -1,3 +1,5 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
 
 import argparse
 import logging
@@ -24,7 +26,7 @@ from semilearn.core.utils import (
 from semilearn.imb_algorithms import get_imb_algorithm, name2imbalg
 
 
-def get_config():
+def get_config(cfg_path=None):
     from semilearn.algorithms.utils import str2bool
 
     parser = argparse.ArgumentParser(description="Semi-Supervised Learning (USB)")
@@ -250,7 +252,7 @@ def get_config():
     parser.add_argument("-ft_bsz", "--ft_batch_size", type=int, default=64)
 
     # config file
-    parser.add_argument("--c", type=str, default='./test_lora_config.yaml')
+    parser.add_argument("--c", type=str, default=cfg_path)
 
     # add algorithm specific parameters
     args = parser.parse_args()
@@ -283,47 +285,179 @@ def get_config():
     return args
 
 
-def create_model(args):
-    args.distributed = args.world_size > 1 or args.multiprocessing_distributed
-    # SET save_path and logger
+def main(args):
+    """
+    For (Distributed)DataParallelism,
+    main(args) spawn each process (main_worker) to each GPU.
+    """
+
+    assert (
+        args.num_train_iter % args.epoch == 0
+    ), f"# total training iter. {args.num_train_iter} is not divisible by # epochs {args.epoch}"  # noqa: E501
     save_path = os.path.join(args.save_dir, args.save_name)
-    logger_level = "WARNING"
-    tb_log = None
+    if os.path.exists(save_path) and args.overwrite and args.resume is False:
+        import shutil
 
-    logger = get_logger(args.save_name, save_path, logger_level)
-    _net_builder = get_net_builder(args.net, args.net_from_name)
+        shutil.rmtree(save_path)
+    if os.path.exists(save_path) and not args.overwrite:
+        raise Exception("already existing model: {}".format(save_path))
+    if args.resume:
+        if args.load_path is None:
+            raise Exception("Resume of training requires --load_path in the args")
+        if (
+            os.path.abspath(save_path) == os.path.abspath(args.load_path)
+            and not args.overwrite
+        ):
+            raise Exception(
+                "Saving & Loading paths are same. \
+                            If you want over-write, give --overwrite in the argument."
+            )
 
-    model = get_algorithm(args, _net_builder, tb_log, logger)
+    if args.seed is not None:
+        warnings.warn(
+            "You have chosen to seed training. "
+            "This will turn on the CUDNN deterministic setting, "
+            "which can slow down your training considerably! "
+            "You may see unexpected behavior when restarting "
+            "from checkpoints."
+        )
 
-    # SET Devices for (Distributed) DataParallel
-    model.model = send_model_cuda(args, model.model)
-    model.ema_model = send_model_cuda(args, model.ema_model, clip_batch=False)
+    if args.gpu == "None":
+        args.gpu = None
+    if args.gpu is not None:
+        warnings.warn(
+            "You have chosen a specific GPU. This will completely "
+            "disable data parallelism."
+        )
+
+    if args.dist_url == "env://" and args.world_size == -1:
+        args.world_size = int(os.environ["WORLD_SIZE"])
+
+    # distributed: true if manually selected or if world_size > 1
+    args.distributed = args.world_size > 1 or args.multiprocessing_distributed
+    ngpus_per_node = torch.cuda.device_count()  # number of gpus of each node
+
+    if args.multiprocessing_distributed:
+        # now, args.world_size means num of total processes in all nodes
+        args.world_size = ngpus_per_node * args.world_size
+
+        # args=(,) means the arguments of main_worker
+        mp.spawn(main_worker, nprocs=ngpus_per_node, args=(ngpus_per_node, args))
+    else:
+        model = main_worker(args.gpu, ngpus_per_node, args)
 
     return model
 
 
+def main_worker(gpu, ngpus_per_node, args):
+    """
+    main_worker is conducted on each GPU.
+    """
 
-if __name__ == '__main__':
-    # Create args for the model, note to specify resume and load path;
-    args = get_config()
+    global best_acc1
+    args.gpu = gpu
+
+    # random seed has to be set for the synchronization of labeled data sampling in each
+    # process.
+    assert args.seed is not None
+    random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    np.random.seed(args.seed)
+    cudnn.deterministic = True
+    cudnn.benchmark = True
+
+    # SET UP FOR DISTRIBUTED TRAINING
+    if args.distributed:
+        if args.dist_url == "env://" and args.rank == -1:
+            args.rank = int(os.environ["RANK"])
+
+        if args.multiprocessing_distributed:
+            args.rank = args.rank * ngpus_per_node + gpu  # compute global rank
+
+        # set distributed group:
+        dist.init_process_group(
+            backend=args.dist_backend,
+            init_method=args.dist_url,
+            world_size=args.world_size,
+            rank=args.rank,
+        )
+
+    # SET save_path and logger
+    save_path = os.path.join(args.save_dir, args.save_name)
+    logger_level = "WARNING"
+    tb_log = None
+    if args.rank % ngpus_per_node == 0:
+        tb_log = TBLog(save_path, "tensorboard", use_tensorboard=args.use_tensorboard)
+        logger_level = "INFO"
+
+    logger = get_logger(args.save_name, save_path, logger_level)
+    logger.info(f"Use GPU: {args.gpu} for training")
+
+    _net_builder = get_net_builder(args.net, args.net_from_name)
+    # optimizer, scheduler, datasets, dataloaders with be set in algorithms
+    if args.imb_algorithm is not None:
+        model = get_imb_algorithm(args, _net_builder, tb_log, logger)
+    else:
+        model = get_algorithm(args, _net_builder, tb_log, logger)
+    logger.info(f"Number of Trainable Params: {count_parameters(model.model)}")
+
+    # SET Devices for (Distributed) DataParallel
+    model.model = send_model_cuda(args, model.model)
+    model.ema_model = send_model_cuda(args, model.ema_model, clip_batch=False)
+    logger.info(f"Arguments: {model.args}")
+
+    return model
+
+    # # If args.resume, load checkpoints from args.load_path
+    # if args.resume and os.path.exists(args.load_path):
+    #     try:
+    #         model.load_model(args.load_path)
+    #     except:
+    #         logger.info("Fail to resume load path {}".format(args.load_path))
+    #         args.resume = False
+    # else:
+    #     logger.info("Resume load path {} does not exist".format(args.load_path))
+
+    # if hasattr(model, "warmup"):
+    #     logger.info(("Warmup stage"))
+    #     model.warmup()
+
+    # # START TRAINING of FixMatch
+    # logger.info("Model training")
+    # model.train()
+
+    # # print validation (and test results)
+    # for key, item in model.results_dict.items():
+    #     logger.info(f"Model result - {key} : {item}")
+    #
+    # # Finetuning and final testing;
+    # if hasattr(model, "finetune"):
+    #     args.save_name = os.path.join(args.save_name, 'fine_tune')
+    #     save_path = os.path.join(args.save_dir, args.save_name)
+    #     if os.path.exists(save_path) and args.overwrite and args.resume is False:
+    #         import shutil
+    #
+    #         shutil.rmtree(save_path)
+    #     model.save_name = args.save_name
+    #     logger = get_logger(args.save_name, save_path, logger_level)
+    #     logger.info("Finetune stage")
+    #     model.set_finetuning()
+    #     model.model = send_model_cuda(args, model.model)
+    #     model.finetune()
+    #     # print validation (and test results)
+    #     for key, item in model.results_dict.items():
+    #         logger.info(f"Model result - {key} : {item}")
+    #
+    # logging.warning(f"GPU {args.rank} training is FINISHED")
 
 
-    # Create model and load vanilla model;
-    model = create_model(args=args)
-    saved_model = torch.load('/home/y_yin/SSL-Benchmark-USB/saved_models/usb_cv/cpmatch/cifar100_400_0_True_0.1_0.1_1.00_cali5_confTrue_0.001/latest_model.pth')
-    model.model.load_state_dict(saved_model['model'])
-    model.ema_model.load_state_dict(saved_model['ema_model'])
-    model.it = saved_model['it']
-    model.start_epoch = saved_model['epoch']
-    model.epoch = saved_model['epoch']
-    # Test the evaluation function;
-    # Not in this code, ema is not initialized with hook before the run, so we set an additional if else in evaluate();
-    # This should be removed after testing lora;
-    # eval_dict_vanilla = model.evaluate()
-    # Test the lora finetuning function;
-    logging.info('Finetuning model with Lora...')
-    model.finetune()
-    # Test the final performance after finetuning;
-    logging.info('Test Lora finetuned model...')
-    eval_dict_vanilla = model.evaluate()
-
+if __name__ == "__main__":
+    cfg_path = 'config/usb_cv/confmatch/eurosat_40_0.yaml'
+    cfg_path = 'config/usb_cv/fixmatch/fixmatch_eurosat_40_0.yaml'
+    cfg_path = 'config/usb_cv/confmatch/stl10_40_0.yaml'
+    args = get_config(cfg_path)
+    port = get_port()
+    args.dist_url = "tcp://127.0.0.1:" + str(port)
+    model = main(args)
+    loaders = model.loader_dict
+    datas = model.dataset_dict

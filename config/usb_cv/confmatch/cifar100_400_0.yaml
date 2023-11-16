@@ -3,10 +3,10 @@ algorithm: confmatch
 amp: False
 clip: 0.0
 use_cat: True
-save_dir: /data/yuwang/workspace/usb_cv/test_lora
-save_name: confmatch_cifar100_400_lora_qv_0
-resume: True
-load_path: /home/y_yin/SSL-Benchmark-USB/saved_models/usb_cv/cpmatch/cifar100_400_0_True_0.1_0.1_1.00_cali5_confTrue_0.001/latest_model.pth
+save_dir: /data/yuwang/workspace/usb_cv/confmatch
+save_name: cifar100_400_0
+resume: False
+load_path: /data/yuwang/workspace/usb_cv/confmatch/cifar100_400_0/latest_model.pth
 overwrite: True
 use_tensorboard: False
 use_wandb: True

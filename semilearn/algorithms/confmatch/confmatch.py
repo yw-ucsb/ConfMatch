@@ -58,9 +58,9 @@ class ConfBase(AlgorithmBase):
         """
         self.print_fn("Create fine-tuning model, optimizer and scheduler...")
         # Create Lora model;
-        self.model = create_lora_ft_vit(self.args, self.model)
+        # self.model = create_lora_ft_vit(self.args, self.model)
 
-        # create_vanilla_ft_vit(self.model)
+        create_vanilla_ft_vit(self.model)
 
         self.optimizer = get_optimizer(
             self.model,
@@ -142,7 +142,7 @@ class ConfMatch(ConfBase):
         self.delta = args.confmatch_delta
         self.gamma = args.confmatch_gamma
         self.cal_error_rate = 0.
-        self.cf_mat = torch.zeros((2, 2))  # TODO: modify this if bs_u is changed;
+        self.cf_mat = torch.zeros((2, 2))
         self.conf_loss = args.conf_loss
         self.lambda_conf = args.lambda_conf
 
@@ -196,11 +196,11 @@ class ConfMatch(ConfBase):
         n = x_lb.shape[0]
         I = torch.eye(n, device=x_lb.device)
         
-        x_lb_normed = F.normalize(x_lb, p=2,dim=1)
+        x_lb_normed = F.normalize(x_lb, p=2, dim=1)
         sim = torch.mm(x_lb_normed, x_lb_normed.t())
         # sim_probs = sim / sim.sum(1, keepdim=True)
         idx_col, idx_row = torch.meshgrid(y_lb, y_lb)
-        M = self.cf_mat[idx_row,idx_col]
+        M = self.cf_mat[idx_row, idx_col]
         # contrastive loss
         
         loss = -(sim * M/2).sum()
@@ -380,34 +380,9 @@ class ConfMatch(ConfBase):
                          help="hyper-parameter: weight of cali PL accuracy"),
             # Confusion matrix related arguments;
             SSL_Argument("--conf_loss", default=False, type=bool, help="Confusion matrix loss"),
-            SSL_Argument("--lambda_conf", default=1.0, type=float, help="Weight of confusion matrix loss"),
+            SSL_Argument("--lambda_conf", default=0.001, type=float, help="Weight of confusion matrix loss"),
 
             # Archived;
             SSL_Argument("--confmatch_cali_s", default=False, type=bool,
                          help="Strong argumented calibration data for training"),
         ]
-
-    # def create_finetune_setup(self):
-    #     # Fine-tuning trained model with Lora;
-    #     # This will replace the model, optimizer and scheduler, be sure to save states since they will be overwritten;
-    #     self.print_fn("Create fine-tuning optimizer and scheduler...")
-    #
-    #     create_lora_vit(self.model)
-    #     lora.mark_only_lora_as_trainable(self.model)
-    #     # Configure optimizer; TODO: add separate lr, scheduler, decay for different layers;
-    #     self.optimizer = get_optimizer(
-    #         self.model,
-    #         'SGD',
-    #         0.001,
-    #         self.args.momentum,
-    #         0.1,
-    #         self.args.layer_decay,
-    #     )
-    #     epochs = self.ft_epochs
-    #     warmup_epochs = self.ft_warm_up
-    #     per_epoch_steps = self.num_train_iter // self.epochs
-    #     total_iters = self.num_train_iter + per_epoch_steps * (epochs + warmup_epochs)
-    #
-    #     self.scheduler = get_cosine_schedule_with_warmup(
-    #         self.optimizer, 10 * per_epoch_steps, num_warmup_steps=warmup_epochs * per_epoch_steps
-    #     )

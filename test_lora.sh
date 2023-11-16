@@ -1,1 +1,0 @@
-python train.py --c config/usb_cv/confmatch/confmatch_cifar100_400.yaml

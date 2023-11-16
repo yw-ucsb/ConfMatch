@@ -3,10 +3,10 @@ algorithm: confmatch
 amp: False
 clip: 0.0
 use_cat: True
-save_dir: /data/yuwang/workspace/usb_cv/test_lora
-save_name: confmatch_cifar100_400_lora_qv_0
-resume: True
-load_path: /home/y_yin/SSL-Benchmark-USB/saved_models/usb_cv/cpmatch/cifar100_400_0_True_0.1_0.1_1.00_cali5_confTrue_0.001/latest_model.pth
+save_dir: /data/yuwang/workspace/usb_cv/confmatch
+save_name: stl10_40_0
+resume: False
+load_path: /data/yuwang/workspace/usb_cv/confmatch/stl10_40_0/latest_model.pth
 overwrite: True
 use_tensorboard: False
 use_wandb: True
@@ -25,20 +25,20 @@ conf_loss: False
 lambda_conf: 0.001
 confmatch_cali_s: False
 # Training arguments: Data;
-img_size: 32
+img_size: 96
 crop_ratio: 0.875
-data_dir: /data/datasets/usb
-dataset: cifar100
-num_classes: 100
-num_labels: 400
+data_dir: ./data
+dataset: stl10
+num_classes: 10
+num_labels: 40
 # Training arguments: Model;
-net: vit_small_patch2_32
+net: vit_base_patch16_96
 net_from_name: False
 use_pretrain: True
-pretrain_path: https://github.com/microsoft/Semi-supervised-learning/releases/download/v.0.0.0/vit_small_patch2_32_mlp_im_1k_32.pth
+pretrain_path: https://github.com/microsoft/Semi-supervised-learning/releases/download/v.0.0.0/mae_pretrain_vit_base.pth
 # Training arguments: Optimizer;
 optim: AdamW
-lr: 0.0005
+lr: 0.0001
 momentum: 0.9
 weight_decay: 0.0005
 layer_decay: 0.5
@@ -57,7 +57,7 @@ rank: 0
 multiprocessing_distributed: False
 dist_url: tcp://127.0.0.1:10006
 dist_backend: nccl
-gpu: 2
+gpu: 1
 # Evaluation arguments;
 num_eval_iter: 2048
 eval_batch_size: 128

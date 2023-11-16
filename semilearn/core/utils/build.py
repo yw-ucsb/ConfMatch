@@ -111,10 +111,18 @@ def get_dataset(args, algorithm, dataset, num_labels, num_classes, data_dir='./d
     if algorithm == 'confmatch':
         # generator = torch.Generator().manual_seed(42)
         # lb_dset, ca_dset = random_split(lb_dset, [0.7, 0.3], generator=generator)
-        label_per_class =num_labels // num_classes
+        label_per_class = num_labels // num_classes
         label_per_class = floor(label_per_class*0.25)
         if label_per_class == 0:
             label_per_class = 1
+
+        # Get all labels to be spilt from the labeled dataset;
+        # Note: different dataset needs different handling!
+        # e.g.: CIFAR is wrapped directly with BasicDataset and targets are actual targets;
+        #       EuroSAT is wrapped with EuroSat class and actual targets should be indexed
+        #               with idx_list;
+        # if dataset == "eurosat":
+        #     labels =
         labels = np.array(lb_dset.targets)
 
 
