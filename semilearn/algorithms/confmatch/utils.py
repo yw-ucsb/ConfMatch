@@ -67,7 +67,7 @@ class ConfMatchThresholdingHook(MaskingHook):
         # Define selective risk
         def selective_risk(lam): return (cal_yhats[cal_phats >= lam] != cal_labels[cal_phats >= lam]).sum()/(cal_phats >= lam).sum()
         def nlambda(lam): return (cal_phats > lam).sum()
-        def invert_for_ub(r,lam): return binom.cdf(selective_risk(lam)*nlambda(lam), nlambda(lam), r)-self.cp_delta
+        def invert_for_ub(r, lam): return binom.cdf(selective_risk(lam)*nlambda(lam), nlambda(lam), r)-self.cp_delta
         # Construct upper boud
         def selective_risk_ub(lam): return brentq(invert_for_ub, 0, 0.9999, args=(lam,))
 

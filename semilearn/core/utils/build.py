@@ -117,12 +117,6 @@ def get_dataset(args, algorithm, dataset, num_labels, num_classes, data_dir='./d
             label_per_class = 1
 
         # Get all labels to be spilt from the labeled dataset;
-        # Note: different dataset needs different handling!
-        # e.g.: CIFAR is wrapped directly with BasicDataset and targets are actual targets;
-        #       EuroSAT is wrapped with EuroSat class and actual targets should be indexed
-        #               with idx_list;
-        # if dataset == "eurosat":
-        #     labels =
         labels = np.array(lb_dset.targets)
 
 
