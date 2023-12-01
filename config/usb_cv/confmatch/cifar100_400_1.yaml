@@ -64,12 +64,12 @@ eval_batch_size: 128
 ema_m: 0.0
 # Finetuning arguments;
 ft_optim: SGD
-ft_lr: 0.001
+ft_lr: 2e-4 #1e-4
 ft_momentum: 0.9
 ft_weight_decay: 0.1
 ft_layer_decay: 0.5
 ft_batch_size: 64
-ft_num_warmup_iter: 4096
+ft_num_warmup_iter: 8192 #4096
 ft_epoch: 144
 num_ft_iter: 36864
 
