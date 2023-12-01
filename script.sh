@@ -1,13 +1,17 @@
-data_dir="/data/datasets/usb"
+data_dir="data/y_yin/datasets/usb"
+# data_dir="/data/datasets/usb"
 eval_batch_size=128
-gpu=3
+gpu=6
 seeds=(0)
 dataset="cifar100_300"
 dataset="cifar100_400"
 # dataset="cifar100_4000"
-# dataset="tissuemnist_400"
+dataset="eurosat_40"
+dataset="stl10_40"
+dataset="tissuemnist_400"
+dataset="semi_aves_3959"
 method="cpmatch"
-# method="fixmatch"
+method="fixmatch"
 include_lb_to_ulb="False"
 include_lb_to_ulb="True"
 use_wandb=""
@@ -22,13 +26,13 @@ cali_s="False"
 conf_loss="True"
 lambda_conf=0.001
 # dataset="cifar100_300"
-save_dir="./saved_models/usb_cv/${method}/"
+save_dir="./saved_models/usb_cv/${method}_new/"
 for seed in "${seeds[@]}";do
 # save_name="${method}_${dataset}_${seed}_${include_lb_to_ulb}_${confmatch_alpha}_${confmatch_delta}_${confmatch_gamma}_cali${n_repeat_loader_cali}"
 # for FixMatch
 save_name="${method}_${dataset}_${seed}_${include_lb_to_ulb}"
 # for ConfMatch
-save_name="${dataset}_${seed}_${include_lb_to_ulb}_${confmatch_alpha}_${confmatch_delta}_${confmatch_gamma}_cali${n_repeat_loader_cali}_conf${conf_loss}_${lambda_conf}"
+# save_name="${dataset}_${seed}_${include_lb_to_ulb}_${confmatch_alpha}_${confmatch_delta}_${confmatch_gamma}_cali${n_repeat_loader_cali}_conf${conf_loss}_${lambda_conf}"
 load_path="--load_path=${save_dir}${save_name}/latest_model.pth"
 cmd="
 python train.py --c config/usb_cv/${method}/${method}_${dataset}_0.yaml 
