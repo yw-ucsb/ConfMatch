@@ -31,8 +31,8 @@ for seed in "${seeds[@]}";do
 # save_name="${method}_${dataset}_${seed}_${include_lb_to_ulb}_${confmatch_alpha}_${confmatch_delta}_${confmatch_gamma}_cali${n_repeat_loader_cali}"
 # for FixMatch
 save_name="${method}_${dataset}_${seed}_${include_lb_to_ulb}"
-# for ConfMatch
-# save_name="${dataset}_${seed}_${include_lb_to_ulb}_${confmatch_alpha}_${confmatch_delta}_${confmatch_gamma}_cali${n_repeat_loader_cali}_conf${conf_loss}_${lambda_conf}"
+# for ConfMatch1
+save_name="${dataset}_${seed}_${include_lb_to_ulb}_${confmatch_alpha}_${confmatch_delta}_${confmatch_gamma}_cali${n_repeat_loader_cali}_conf${conf_loss}_${lambda_conf}_test_u"
 load_path="--load_path=${save_dir}${save_name}/latest_model.pth"
 cmd="
 python train.py --c config/usb_cv/${method}/${method}_${dataset}_0.yaml 

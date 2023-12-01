@@ -26,7 +26,7 @@ from semilearn.core.utils import (
 from semilearn.imb_algorithms import get_imb_algorithm, name2imbalg
 
 
-def get_config():
+def get_config(cfg_path=None):
     from semilearn.algorithms.utils import str2bool
 
     parser = argparse.ArgumentParser(description="Semi-Supervised Learning (USB)")
@@ -252,7 +252,7 @@ def get_config():
     parser.add_argument("-ft_bsz", "--ft_batch_size", type=int, default=64)
 
     # config file
-    parser.add_argument("--c", type=str)
+    parser.add_argument("--c", type=str, default=cfg_path)
 
     # add algorithm specific parameters
     args = parser.parse_args()
@@ -344,7 +344,9 @@ def main(args):
         # args=(,) means the arguments of main_worker
         mp.spawn(main_worker, nprocs=ngpus_per_node, args=(ngpus_per_node, args))
     else:
-        main_worker(args.gpu, ngpus_per_node, args)
+        model = main_worker(args.gpu, ngpus_per_node, args)
+
+    return model
 
 
 def main_worker(gpu, ngpus_per_node, args):
@@ -404,51 +406,58 @@ def main_worker(gpu, ngpus_per_node, args):
     model.ema_model = send_model_cuda(args, model.ema_model, clip_batch=False)
     logger.info(f"Arguments: {model.args}")
 
-    # If args.resume, load checkpoints from args.load_path
-    if args.resume and os.path.exists(args.load_path):
-        try:
-            model.load_model(args.load_path)
-        except:
-            logger.info("Fail to resume load path {}".format(args.load_path))
-            args.resume = False
-    else:
-        logger.info("Resume load path {} does not exist".format(args.load_path))
+    return model
 
-    if hasattr(model, "warmup"):
-        logger.info(("Warmup stage"))
-        model.warmup()
+    # # If args.resume, load checkpoints from args.load_path
+    # if args.resume and os.path.exists(args.load_path):
+    #     try:
+    #         model.load_model(args.load_path)
+    #     except:
+    #         logger.info("Fail to resume load path {}".format(args.load_path))
+    #         args.resume = False
+    # else:
+    #     logger.info("Resume load path {} does not exist".format(args.load_path))
 
-    # START TRAINING of FixMatch
-    logger.info("Model training")
-    model.train()
+    # if hasattr(model, "warmup"):
+    #     logger.info(("Warmup stage"))
+    #     model.warmup()
 
-    # print validation (and test results)
-    for key, item in model.results_dict.items():
-        logger.info(f"Model result - {key} : {item}")
+    # # START TRAINING of FixMatch
+    # logger.info("Model training")
+    # model.train()
 
-    # Finetuning and final testing;
-    if hasattr(model, "finetune"):
-        args.save_name = os.path.join(args.save_name, 'fine_tune')
-        save_path = os.path.join(args.save_dir, args.save_name)
-        if os.path.exists(save_path) and args.overwrite and args.resume is False:
-            import shutil
-
-            shutil.rmtree(save_path)
-        model.save_name = args.save_name
-        logger = get_logger(args.save_name, save_path, logger_level)
-        logger.info("Finetune stage")
-        model.set_finetuning()
-        model.model = send_model_cuda(args, model.model)
-        model.finetune()
-        # print validation (and test results)
-        for key, item in model.results_dict.items():
-            logger.info(f"Model result - {key} : {item}")
-
-    logging.warning(f"GPU {args.rank} training is FINISHED")
+    # # print validation (and test results)
+    # for key, item in model.results_dict.items():
+    #     logger.info(f"Model result - {key} : {item}")
+    #
+    # # Finetuning and final testing;
+    # if hasattr(model, "finetune"):
+    #     args.save_name = os.path.join(args.save_name, 'fine_tune')
+    #     save_path = os.path.join(args.save_dir, args.save_name)
+    #     if os.path.exists(save_path) and args.overwrite and args.resume is False:
+    #         import shutil
+    #
+    #         shutil.rmtree(save_path)
+    #     model.save_name = args.save_name
+    #     logger = get_logger(args.save_name, save_path, logger_level)
+    #     logger.info("Finetune stage")
+    #     model.set_finetuning()
+    #     model.model = send_model_cuda(args, model.model)
+    #     model.finetune()
+    #     # print validation (and test results)
+    #     for key, item in model.results_dict.items():
+    #         logger.info(f"Model result - {key} : {item}")
+    #
+    # logging.warning(f"GPU {args.rank} training is FINISHED")
 
 
 if __name__ == "__main__":
-    args = get_config()
+    cfg_path = 'config/usb_cv/confmatch/eurosat_40_0.yaml'
+    cfg_path = 'config/usb_cv/fixmatch/fixmatch_eurosat_40_0.yaml'
+    cfg_path = 'config/usb_cv/confmatch/stl10_40_0.yaml'
+    args = get_config(cfg_path)
     port = get_port()
     args.dist_url = "tcp://127.0.0.1:" + str(port)
-    main(args)
+    model = main(args)
+    loaders = model.loader_dict
+    datas = model.dataset_dict

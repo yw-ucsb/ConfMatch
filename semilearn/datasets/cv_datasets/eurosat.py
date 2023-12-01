@@ -117,7 +117,7 @@ def get_eurosat(args, alg, dataset, num_labels, num_classes, data_dir='./data', 
     # construct datasets for training and testing
     if alg == 'fullysupervised':
         if len(train_unlabeled_idxs) == len(total_idxs):
-            train_labeled_idxs = train_unlabeled_idxs 
+            train_labeled_idxs = train_unlabeled_idxs .id
         else:
             train_labeled_idxs = np.concatenate([train_labeled_idxs, train_unlabeled_idxs])
     
@@ -192,10 +192,11 @@ class EuroSat(ImageFolder, BasicDataset):
             raise Exception('unknown split parameter for EuroSat!!!')
 
         self.idx_list = np.asarray(self.idx_list)
-        self.targets = np.asarray(self.targets)[self.idx_list]
 
         if idx_list is not None:
             self.idx_list = idx_list
+
+        self.targets = np.asarray(self.targets)[self.idx_list]
         
         self.data = []
         for i in range(len(self.samples)):

@@ -1,0 +1,76 @@
+# USB basic arguments, may not want to change;
+algorithm: confmatch
+amp: False
+clip: 0.0
+use_cat: True
+save_dir: /data/yuwang/workspace/usb_cv/confmatch
+save_name: eurosat_40_0
+resume: False
+load_path: /data/yuwang/workspace/usb_cv/confmatch/eurosat_40_0/latest_model.pth
+overwrite: True
+use_tensorboard: False
+use_wandb: True
+num_log_iter: 256
+# Algorithm arguments: FixMatch;
+hard_label: True
+T: 0.5
+p_cutoff: 0.95
+ulb_loss_ratio: 1.0
+# Algorithm arguments: ConfMatch;
+n_repeat_loader_cali: 5
+confmatch_alpha: 0.1
+confmatch_delta: 0.1
+confmatch_gamma: 0.5
+conf_loss: False
+lambda_conf: 0.001
+confmatch_cali_s: False
+# Training arguments: Data;
+img_size: 32
+crop_ratio: 0.875
+data_dir: /data/datasets/usb
+dataset: eurosat
+num_classes: 10
+num_labels: 40
+# Training arguments: Model;
+net: vit_small_patch2_32
+net_from_name: False
+use_pretrain: True
+pretrain_path: https://github.com/microsoft/Semi-supervised-learning/releases/download/v.0.0.0/vit_small_patch2_32_mlp_im_1k_32.pth
+# Training arguments: Optimizer;
+optim: AdamW
+lr: 1e-4
+momentum: 0.9
+weight_decay: 0.0005
+layer_decay: 0.5
+num_warmup_iter: 5120
+train_sampler: RandomSampler
+batch_size: 8
+uratio: 1
+# Training arguments: Trainer;
+epoch: 200
+num_train_iter: 204800
+# Training arguments: GPU and Multi-processing;
+num_workers: 4
+seed: 0
+world_size: 1
+rank: 0
+multiprocessing_distributed: False
+dist_url: tcp://127.0.0.1:10006
+dist_backend: nccl
+gpu: 3
+# Evaluation arguments;
+num_eval_iter: 2048
+eval_batch_size: 128
+ema_m: 0.0
+# Finetuning arguments;
+ft_optim: SGD
+ft_lr: 0.001
+ft_momentum: 0.9
+ft_weight_decay: 0.1
+ft_layer_decay: 0.5
+ft_batch_size: 64
+ft_num_warmup_iter: 4096
+ft_epoch: 144
+num_ft_iter: 36864
+
+

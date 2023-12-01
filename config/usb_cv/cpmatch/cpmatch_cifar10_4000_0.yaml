@@ -1,4 +1,4 @@
-algorithm: cpmatch
+algorithm: confmatch
 save_dir: ./saved_models/usb_cv/
 save_name: cpmatch_cifar10_400_0
 resume: True
