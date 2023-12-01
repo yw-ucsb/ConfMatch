@@ -4,9 +4,9 @@ amp: False
 clip: 0.0
 use_cat: True
 save_dir: /data/yuwang/workspace/usb_cv/confmatch
-save_name: cifar100_400_1
+save_name: cifar100_400_2
 resume: False
-load_path: /data/yuwang/workspace/usb_cv/confmatch/cifar100_400_1/latest_model.pth
+load_path: /data/yuwang/workspace/usb_cv/confmatch/cifar100_400_2/latest_model.pth
 overwrite: True
 use_tensorboard: False
 use_wandb: True
@@ -45,10 +45,10 @@ layer_decay: 0.5
 num_warmup_iter: 5120
 train_sampler: RandomSampler
 batch_size: 8
-uratio: 8
+uratio: 32
 # Training arguments: Trainer;
-epoch: 200
-num_train_iter: 204800
+epoch: 100 #200
+num_train_iter: 102400 #204800
 # Training arguments: GPU and Multi-processing;
 num_workers: 4
 seed: 0
@@ -57,7 +57,7 @@ rank: 0
 multiprocessing_distributed: False
 dist_url: tcp://127.0.0.1:10006
 dist_backend: nccl
-gpu: 2
+gpu: 5
 # Evaluation arguments;
 num_eval_iter: 2048
 eval_batch_size: 128
