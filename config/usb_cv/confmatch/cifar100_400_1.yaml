@@ -45,7 +45,7 @@ layer_decay: 0.5
 num_warmup_iter: 5120
 train_sampler: RandomSampler
 batch_size: 8
-uratio: 32
+uratio: 32 #8
 # Training arguments: Trainer;
 epoch: 100 #200
 num_train_iter: 102400 #204800
