@@ -49,5 +49,8 @@ class PseudoLabelingHook(Hook):
         else:
             # inputs logits converted to probabilities already
             pseudo_label = logits
+        
+        confusion_matrix = algorithm.cf_mat
+        
         return pseudo_label
         

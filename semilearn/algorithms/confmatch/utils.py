@@ -5,7 +5,7 @@
 import torch
 import numpy as np
 import loralib as lora
-from semilearn.algorithms.hooks import MaskingHook
+from semilearn.algorithms.hooks import MaskingHook, PseudoLabelingHook
 from scipy.optimize import brentq
 from scipy.stats import binom
 from sklearn.metrics import confusion_matrix
@@ -60,9 +60,13 @@ class ConfMatchThresholdingHook(MaskingHook):
         # Compute calibration error rate
         cal_error_rate = (cal_labels != cal_yhats).mean()
 
-        # Compute confusion matrix
+        # confusion matrix normalized by ground truth
         cf_mat = confusion_matrix(cal_labels, cal_yhats, normalize="true")
         cf_mat = torch.tensor(cf_mat).cuda(gpu)
+
+        # confusion matrix normalized by prediction
+        cf_mat_pred = confusion_matrix(cal_labels, cal_yhats, normalize="pred")
+        cf_mat_pred = torch.tensor(cf_mat_pred).cuda(gpu)
 
         # Define selective risk
         def selective_risk(lam): return (cal_yhats[cal_phats >= lam] != cal_labels[cal_phats >= lam]).sum()/(cal_phats >= lam).sum()
@@ -89,14 +93,14 @@ class ConfMatchThresholdingHook(MaskingHook):
                 if risk > self.cp_alpha: 
                     print(f'Cal Error:{100*cal_error_rate:.2f}%, min risk:{100*risk_min:.2f}%, alpha:{100*self.cp_alpha:.2f}, threshold:{lhat:.2f}')
                     break
-            return lhat.item(), cal_error_rate, cf_mat
+            return lhat.item(), cal_error_rate, cf_mat, cf_mat_pred
         except:
             print(f'Failed control. Cal Error:{100*cal_error_rate:.2f}%, min risk:{100*risk_min:.2f}%, alpha:{100*self.cp_alpha:.2f}, threshold:0.95')
-            return 0.95, cal_error_rate, cf_mat
+            return 0.95, cal_error_rate, cf_mat, cf_mat_pred
     
     @torch.no_grad()
     def update(self, algorithm):
-        algorithm.p_cutoff, algorithm.cal_error_rate, algorithm.cf_mat = self.selective_control(algorithm)
+        algorithm.p_cutoff, algorithm.cal_error_rate, algorithm.cf_mat, algorithm.cf_mat_pred = self.selective_control(algorithm)
 
     @torch.no_grad()
     def masking(self, algorithm, logits_x_ulb, softmax_x_ulb=True, *args, **kwargs):
@@ -160,3 +164,46 @@ def create_vanilla_ft_vit(model):
         if name not in ['%s.weight' % 'head', '%s.bias' % 'head']:
             param.requires_grad = False
 
+
+class ConfMatchSoftPseudoLabelingHook(PseudoLabelingHook):
+    def __init__(self):
+        super().__init__()
+    
+    @torch.no_grad()
+    def gen_ulb_targets(self, 
+                        algorithm, 
+                        logits, 
+                        use_hard_label=True, 
+                        T=1.0,
+                        softmax=True, # whether to compute softmax for logits, input must be logits
+                        label_smoothing=0.0):
+        
+        """
+        generate pseudo-labels from logits/probs
+
+        Args:
+            algorithm: base algorithm
+            logits: logits (or probs, need to set softmax to False)
+            use_hard_label: flag of using hard labels instead of soft labels
+            T: temperature parameters
+            softmax: flag of using softmax on logits
+            label_smoothing: label_smoothing parameter
+        """
+
+        logits = logits.detach()
+        # if use_hard_label:
+        #     # return hard label directly
+        #     pseudo_label = torch.argmax(logits, dim=-1)
+        #     if label_smoothing:
+        #         pseudo_label = smooth_targets(logits, pseudo_label, label_smoothing)
+        #     return pseudo_label
+        
+        # return soft label
+        if softmax:
+            # pseudo_label = torch.softmax(logits / T, dim=-1)
+            pseudo_label = algorithm.compute_prob(logits / T)
+        else:
+            # inputs logits converted to probabilities already
+            pseudo_label = logits
+        
+        return pseudo_label

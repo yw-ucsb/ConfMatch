@@ -11,7 +11,7 @@ from semilearn.core.utils import ALGORITHMS, get_data_loader, send_model_cuda
 from semilearn.algorithms.hooks import PseudoLabelingHook, FixedThresholdingHook
 from semilearn.algorithms.utils import SSL_Argument, str2bool
 from semilearn.algorithms.fixmatch import FixMatch
-from .utils import ConfMatchThresholdingHook, create_lora_ft_vit, create_vanilla_ft_vit
+from .utils import ConfMatchThresholdingHook, create_lora_ft_vit, create_vanilla_ft_vit, ConfMatchSoftPseudoLabelingHook
 from semilearn.core.utils import (
     Bn_Controller,
     get_cosine_schedule_with_warmup,
@@ -143,6 +143,7 @@ class ConfMatch(ConfBase):
         self.gamma = args.confmatch_gamma
         self.cal_error_rate = 0.
         self.cf_mat = torch.zeros((2, 2))
+        self.cf_mat_pred = torch.zeros((2, 2))
         self.conf_loss = args.conf_loss
         self.lambda_conf = args.lambda_conf
 
@@ -189,6 +190,7 @@ class ConfMatch(ConfBase):
         self.register_hook(PseudoLabelingHook(), "PseudoLabelingHook")
         self.register_hook(ConfMatchThresholdingHook(alpha=self.alpha, delta=self.delta, gamma=self.gamma), "ThresholdingHook")
         self.register_hook(FixedThresholdingHook(), "MaskingHook")
+        self.register_hook(ConfMatchSoftPseudoLabelingHook(), "SoftPseudoLabelingHook")
         super().set_hooks()
 
     def cpmatch_contrastive_loss(self, x_lb, y_lb, T=0.2):
@@ -197,17 +199,17 @@ class ConfMatch(ConfBase):
         I = torch.eye(n, device=x_lb.device)
         
         x_lb_normed = F.normalize(x_lb, p=2, dim=1)
-        sim = torch.mm(x_lb_normed, x_lb_normed.t())
+        sim = torch.mm(x_lb_normed, x_lb_normed.t().detach())
         # sim_probs = sim / sim.sum(1, keepdim=True)
         idx_col, idx_row = torch.meshgrid(y_lb, y_lb)
         M = self.cf_mat[idx_row, idx_col]
         # contrastive loss
         
-        loss = -(sim * M/2).sum()
+        loss = (sim * M/2).sum()
         for i in range(n-1):
             for j in range(i+1, n):
                 if y_lb[i] == y_lb[j]:
-                    loss = loss + sim[i, j]
+                    loss = loss - sim[i, j]
         return loss
 
     def train_step(self, x_lb, y_lb, x_ulb_w, x_ulb_s, y_ulb):
@@ -255,11 +257,18 @@ class ConfMatch(ConfBase):
                                           use_hard_label=self.use_hard_label,
                                           T=self.T,
                                           softmax=False)
+            use_soft_label = False
+            if use_soft_label:
+                unsup_loss = self.consistency_loss(logits_x_ulb_s,
+                                                self.cf_mat_pred[:,pseudo_label].T,
+                                                'ce',
+                                                mask=mask)
 
-            unsup_loss = self.consistency_loss(logits_x_ulb_s,
-                                               pseudo_label,
-                                               'ce',
-                                               mask=mask)
+            else:
+                unsup_loss = self.consistency_loss(logits_x_ulb_s,
+                                                pseudo_label,
+                                                'ce',
+                                                mask=mask)
 
             # Calculate the accuracy of the pseudo labels on selected unlabeled data;
             ulb_select_top1 = torch.eq(pseudo_label, y_ulb).float() * mask # TODO
