@@ -9,9 +9,37 @@ from semilearn.algorithms.hooks import MaskingHook, PseudoLabelingHook
 from scipy.optimize import brentq
 from scipy.stats import binom
 from sklearn.metrics import confusion_matrix
+from semilearn.algorithms.softmatch.utils import SoftMatchWeightingHook
 
 from semilearn.core.utils import ALGORITHMS, get_data_loader, send_model_cuda
 
+class ConfMatchWeightingHook(SoftMatchWeightingHook):
+    @torch.no_grad()
+    def masking(self, algorithm, logits_x_ulb, softmax_x_ulb=True, *args, **kwargs):
+        if not self.prob_max_mu_t.is_cuda:
+            self.prob_max_mu_t = self.prob_max_mu_t.to(logits_x_ulb.device)
+        if not self.prob_max_var_t.is_cuda:
+            self.prob_max_var_t = self.prob_max_var_t.to(logits_x_ulb.device)
+
+        if softmax_x_ulb:
+            probs_x_ulb = torch.softmax(logits_x_ulb.detach(), dim=-1)
+        else:
+            # logits is already probs
+            probs_x_ulb = logits_x_ulb.detach()
+
+        self.update(algorithm, probs_x_ulb)
+
+        max_probs, max_idx = probs_x_ulb.max(dim=-1)
+        # compute weight
+        if not self.per_class:
+            mu = algorithm.p_cutoff
+            var = self.prob_max_var_t
+        else:
+            mu = self.prob_max_mu_t[max_idx]
+            var = self.prob_max_var_t[max_idx]
+        mask = torch.exp(-((torch.clamp(max_probs - mu, max=0.0) ** 2) / (2 * var / (self.n_sigma ** 2))))
+        return mask
+        
 class ConfMatchThresholdingHook(MaskingHook):
     """
     Dynamic Threshold in CpMatch
@@ -44,6 +72,8 @@ class ConfMatchThresholdingHook(MaskingHook):
             o = model(x)["logits"]
 
             smx = torch.nn.Softmax(dim=1)(o)
+            smx = algorithm.call_hook("dist_align", "DistAlignHook", probs_x_ulb=smx)
+
             y_pred = torch.argmax(smx, dim=1)
             y_prob, _ = smx.max(axis=1)
             cal_labels.append(y)
@@ -54,10 +84,7 @@ class ConfMatchThresholdingHook(MaskingHook):
         cal_labels = torch.cat(cal_labels).cpu().numpy()
         cal_yhats = torch.cat(cal_yhats).cpu().numpy()
         cal_phats = torch.cat(cal_phats).cpu().numpy()
-        # print(len(cal_labels))
-        # print(cal_labels[:6])
-        # print(cal_yhats[:6])
-        # Compute calibration error rate
+
         cal_error_rate = (cal_labels != cal_yhats).mean()
 
         # confusion matrix normalized by ground truth

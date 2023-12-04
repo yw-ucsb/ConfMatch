@@ -11,8 +11,7 @@ from semilearn.core.utils import ALGORITHMS, get_data_loader, send_model_cuda, c
 from semilearn.algorithms.hooks import PseudoLabelingHook, FixedThresholdingHook, DistAlignEMAHook
 from semilearn.algorithms.utils import SSL_Argument, str2bool
 from semilearn.algorithms.fixmatch import FixMatch
-from semilearn.algorithms.softmatch.utils import SoftMatchWeightingHook
-from .utils import ConfMatchThresholdingHook, create_lora_ft_vit, create_vanilla_ft_vit, ConfMatchSoftPseudoLabelingHook
+from .utils import ConfMatchThresholdingHook, create_lora_ft_vit, create_vanilla_ft_vit, ConfMatchSoftPseudoLabelingHook, ConfMatchWeightingHook
 from torchsummary import summary
 from semilearn.core.utils import (
     Bn_Controller,
@@ -195,8 +194,12 @@ class ConfMatch(ConfBase):
     def set_hooks(self):
         self.register_hook(PseudoLabelingHook(), "PseudoLabelingHook")
         self.register_hook(ConfMatchThresholdingHook(alpha=self.alpha, delta=self.delta, gamma=self.gamma), "ThresholdingHook")
-        self.register_hook(FixedThresholdingHook(), "MaskingHook")
+        # self.register_hook(FixedThresholdingHook(), "MaskingHook")
         self.register_hook(ConfMatchSoftPseudoLabelingHook(), "SoftPseudoLabelingHook")
+        self.register_hook(ConfMatchWeightingHook(num_classes=self.num_classes, n_sigma=self.args.n_sigma, momentum=self.args.ema_p, per_class=self.args.per_class), "MaskingHook")
+        self.register_hook(
+            DistAlignEMAHook(num_classes=self.num_classes, momentum=self.args.ema_p, p_target_type='uniform' if self.args.dist_uniform else 'model'), 
+            "DistAlignHook")
         super().set_hooks()
 
     def cpmatch_contrastive_loss(self, x_lb, y_lb, T=0.2):
@@ -250,16 +253,17 @@ class ConfMatch(ConfBase):
             sup_loss = self.ce_loss(logits_x_lb, y_lb, reduction='mean')
             
             # probs_x_ulb_w = torch.softmax(logits_x_ulb_w, dim=-1)
+            probs_x_lb = torch.softmax(logits_x_lb.detach(), dim=-1)
             probs_x_ulb_w = self.compute_prob(logits_x_ulb_w.detach())
             
             # if distribution alignment hook is registered, call it 
             # this is implemented for imbalanced algorithm - CReST
-            if self.registered_hook("DistAlignHook"):
-                probs_x_ulb_w = self.call_hook("dist_align", "DistAlignHook", probs_x_ulb=probs_x_ulb_w.detach())
+            # uniform distribution alignment 
+            probs_x_ulb_w = self.call_hook("dist_align", "DistAlignHook", probs_x_ulb=probs_x_ulb_w, probs_x_lb=probs_x_lb)
 
 
             # compute mask based on algorithm defined thresholding;
-            mask = self.call_hook("masking", "ThresholdingHook", logits_x_ulb=probs_x_ulb_w, softmax_x_ulb=False)
+            mask = self.call_hook("masking", "MaskingHook", logits_x_ulb=probs_x_ulb_w, softmax_x_ulb=False)
 
             # generate unlabeled targets using pseudo label hook
             pseudo_label = self.call_hook("gen_ulb_targets", "PseudoLabelingHook", 
@@ -404,4 +408,10 @@ class ConfMatch(ConfBase):
             # Archived;
             SSL_Argument("--confmatch_cali_s", default=False, type=bool,
                          help="Strong argumented calibration data for training"),
+            # Softmatch
+            SSL_Argument('--dist_align', str2bool, True),
+            SSL_Argument('--dist_uniform', str2bool, True),
+            SSL_Argument('--ema_p', float, 0.999),
+            SSL_Argument('--n_sigma', int, 2),
+            SSL_Argument('--per_class', str2bool, False),
         ]
