@@ -7,11 +7,13 @@ from torch.nn import LayerNorm
 import torch.nn.functional as F
 import numpy as np
 from semilearn.core.algorithmbase import AlgorithmBase
-from semilearn.core.utils import ALGORITHMS, get_data_loader, send_model_cuda
-from semilearn.algorithms.hooks import PseudoLabelingHook, FixedThresholdingHook
+from semilearn.core.utils import ALGORITHMS, get_data_loader, send_model_cuda, count_parameters
+from semilearn.algorithms.hooks import PseudoLabelingHook, FixedThresholdingHook, DistAlignEMAHook
 from semilearn.algorithms.utils import SSL_Argument, str2bool
 from semilearn.algorithms.fixmatch import FixMatch
+from semilearn.algorithms.softmatch.utils import SoftMatchWeightingHook
 from .utils import ConfMatchThresholdingHook, create_lora_ft_vit, create_vanilla_ft_vit, ConfMatchSoftPseudoLabelingHook
+from torchsummary import summary
 from semilearn.core.utils import (
     Bn_Controller,
     get_cosine_schedule_with_warmup,
@@ -59,8 +61,11 @@ class ConfBase(AlgorithmBase):
         self.print_fn("Create fine-tuning model, optimizer and scheduler...")
         # Create Lora model;
         # self.model = create_lora_ft_vit(self.args, self.model)
-
+        # summary(self.model)
+        # print(self.model)
+        # assert False
         create_vanilla_ft_vit(self.model)
+        print(f"Number of Trainable Params: {count_parameters(self.model)}")
 
         self.optimizer = get_optimizer(
             self.model,
@@ -113,6 +118,7 @@ class ConfBase(AlgorithmBase):
 
     def finetune_step(self, x_lb, y_lb):
         # Fintuning is done with CE loss on all labeled data;
+        # print(self.model.head)
         with self.amp_cm():
             outs_x_lb = self.model(x_lb)
             logits_x_lb = outs_x_lb['logits']
@@ -201,15 +207,19 @@ class ConfMatch(ConfBase):
         x_lb_normed = F.normalize(x_lb, p=2, dim=1)
         sim = torch.mm(x_lb_normed, x_lb_normed.t().detach())
         # sim_probs = sim / sim.sum(1, keepdim=True)
-        idx_col, idx_row = torch.meshgrid(y_lb, y_lb)
+        idx_row, idx_col = torch.meshgrid(y_lb, y_lb)
         M = self.cf_mat[idx_row, idx_col]
         # contrastive loss
+        flags = torch.eq(idx_col, idx_row).int() - I
+
+        M = M - flags
         
         loss = (sim * M/2).sum()
-        for i in range(n-1):
-            for j in range(i+1, n):
-                if y_lb[i] == y_lb[j]:
-                    loss = loss - sim[i, j]
+
+        # for i in range(n-1):
+        #     for j in range(i+1, n):
+        #         if y_lb[i] == y_lb[j]:
+        #             loss = loss - sim[i, j]
         return loss
 
     def train_step(self, x_lb, y_lb, x_ulb_w, x_ulb_s, y_ulb):

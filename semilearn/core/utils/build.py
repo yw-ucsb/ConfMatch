@@ -112,7 +112,7 @@ def get_dataset(args, algorithm, dataset, num_labels, num_classes, data_dir='./d
         # generator = torch.Generator().manual_seed(42)
         # lb_dset, ca_dset = random_split(lb_dset, [0.7, 0.3], generator=generator)
         label_per_class = num_labels // num_classes
-        label_per_class = floor(label_per_class*0.25)
+        label_per_class = floor(label_per_class*0.1)
         if label_per_class == 0:
             label_per_class = 1
 

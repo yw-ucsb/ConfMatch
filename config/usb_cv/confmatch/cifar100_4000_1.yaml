@@ -3,10 +3,10 @@ algorithm: confmatch
 amp: False
 clip: 0.0
 use_cat: True
-save_dir: /data/y_yin/workspace/usb_cv/cifar100_400
-save_name: confmatch_lambda_0.01_uratio_4_mask_align
+save_dir: /data/y_yin/workspace/usb_cv/confmatch
+save_name: cifar100_4000_0_uratio_8
 resume: True
-load_path: /data/y_yin/workspace/usb_cv/confmatch/cifar100_400  # /data/y_yin/workspace/usb_cv/confmatch/cifar100_400_5_cp/cifar100_400_5/model_best.pth
+load_path: /data/y_yin/workspace/usb_cv/confmatch/cifar100_4000  # /data/y_yin/workspace/usb_cv/confmatch/cifar100_400_5_cp/cifar100_400_5/model_best.pth
 overwrite: True
 use_tensorboard: False
 use_wandb: True
@@ -30,7 +30,7 @@ crop_ratio: 0.875
 data_dir: /data/datasets/usb
 dataset: cifar100
 num_classes: 100
-num_labels: 400
+num_labels: 4000
 # Training arguments: Model;
 net: vit_small_patch2_32
 net_from_name: False
@@ -57,7 +57,7 @@ rank: 0
 multiprocessing_distributed: False
 dist_url: tcp://127.0.0.1:10006
 dist_backend: nccl
-gpu: 3
+gpu: 4
 # Evaluation arguments;
 num_eval_iter: 2048
 eval_batch_size: 128

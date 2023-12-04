@@ -414,17 +414,15 @@ def main_worker(gpu, ngpus_per_node, args):
     else:
         logger.info("Resume load path {} does not exist".format(args.load_path))
 
-    if hasattr(model, "warmup"):
-        logger.info(("Warmup stage"))
-        model.warmup()
+    # if hasattr(model, "warmup"):
+    #     logger.info(("Warmup stage"))
+    #     model.warmup()
 
-    # START TRAINING of FixMatch
-    logger.info("Model training")
-    model.train()
-
+    # # START TRAINING of FixMatch
+    # logger.info("Model training")
+    # model.train()
+    model.total_iter = model.it + args.num_ft_iter
     # print validation (and test results)
-    for key, item in model.results_dict.items():
-        logger.info(f"Model result - {key} : {item}")
 
     # Finetuning and final testing;
     if hasattr(model, "finetune"):

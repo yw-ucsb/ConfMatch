@@ -144,15 +144,23 @@ def create_lora_ft_vit(args, model, r=8):
     # Find attention layers in vit and replace the q, v with lora linear layer;
     # Note USB implements qkv with a single linear layer;
     # In USB, attention layers are marked as sel.blocks[i].attn.qkv;
+    r = 2
     n_feat = model.num_features
     n_classes = model.num_classes
+
+    # Setup trainable parameters;
+    state_dict = model.state_dict()
     for block in model.blocks:
         block.attn.qkv = lora.MergedLinear(n_feat, 3*n_feat, r=r, enable_lora=[True, False, True])
 
     # Find the final head and replace with lora linear layers;
     # model.head = lora.Linear(n_feat, n_classes, r=r)
-    # Setup trainable parameters;
+    model.load_state_dict(state_dict, strict=False)
+    # lora.mark_only_lora_as_trainable(model, bias='all')
     lora.mark_only_lora_as_trainable(model)
+    for name, param in model.named_parameters():
+        if name in ['%s.weight' % 'head', '%s.bias' % 'head']:
+            param.requires_grad = True
     # Send model to devices;
     model = send_model_cuda(args, model)
 
