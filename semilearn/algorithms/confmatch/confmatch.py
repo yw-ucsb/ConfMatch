@@ -194,12 +194,11 @@ class ConfMatch(ConfBase):
     def set_hooks(self):
         self.register_hook(PseudoLabelingHook(), "PseudoLabelingHook")
         self.register_hook(ConfMatchThresholdingHook(alpha=self.alpha, delta=self.delta, gamma=self.gamma), "ThresholdingHook")
-        # self.register_hook(FixedThresholdingHook(), "MaskingHook")
         self.register_hook(ConfMatchSoftPseudoLabelingHook(), "SoftPseudoLabelingHook")
-        self.register_hook(ConfMatchWeightingHook(num_classes=self.num_classes, n_sigma=self.args.n_sigma, momentum=self.args.ema_p, per_class=self.args.per_class), "MaskingHook")
-        self.register_hook(
-            DistAlignEMAHook(num_classes=self.num_classes, momentum=self.args.ema_p, p_target_type='uniform' if self.args.dist_uniform else 'model'), 
-            "DistAlignHook")
+        # self.register_hook(ConfMatchWeightingHook(num_classes=self.num_classes, n_sigma=self.args.n_sigma, momentum=self.args.ema_p, per_class=self.args.per_class), "MaskingHook")
+        # self.register_hook(
+        #     DistAlignEMAHook(num_classes=self.num_classes, momentum=self.args.ema_p, p_target_type='uniform' if self.args.dist_uniform else 'model'),
+        #     "DistAlignHook")
         super().set_hooks()
 
     def cpmatch_contrastive_loss(self, x_lb, y_lb, T=0.2):
@@ -219,10 +218,6 @@ class ConfMatch(ConfBase):
         
         loss = (sim * M/2).sum()
 
-        # for i in range(n-1):
-        #     for j in range(i+1, n):
-        #         if y_lb[i] == y_lb[j]:
-        #             loss = loss - sim[i, j]
         return loss
 
     def train_step(self, x_lb, y_lb, x_ulb_w, x_ulb_s, y_ulb):
@@ -287,7 +282,6 @@ class ConfMatch(ConfBase):
             # Calculate the accuracy of the pseudo labels on selected unlabeled data;
             ulb_select_top1 = torch.eq(pseudo_label, y_ulb).float() * mask # TODO
             ulb_select_top1 = ulb_select_top1.sum() / mask.shape[0]
-
 
             # Confusion matrix regularization loss;
             if self.conf_loss:
@@ -395,6 +389,7 @@ class ConfMatch(ConfBase):
             SSL_Argument('--p_cutoff', float, 0.95),
             # ConfMatch specified arguments;
             # Risk control related arguments;
+            SSL_Argument("--num_cali", default=100, type=int, help="Number of calibration data points"),
             SSL_Argument("--n_repeat_loader_cali", default=5, type=int,
                          help="repeat x times of weak argumentation for calibration data"),
             SSL_Argument("--confmatch_alpha", default=.1, type=float, help="hyper-parameter: error rate"),

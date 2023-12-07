@@ -107,29 +107,53 @@ def get_dataset(args, algorithm, dataset, num_labels, num_classes, data_dir='./d
     else:
         return None
     
-    # CpMatch algorithm: split labeled dataset： dataset_dict["train_lb"] --> dataset_dict["train_lb"], dataset_dict["cali"]
+    # ConfMatch algorithm: split labeled dataset： dataset_dict["train_lb"] --> dataset_dict["train_lb"], dataset_dict["cali"]
     if algorithm == 'confmatch':
         # generator = torch.Generator().manual_seed(42)
         # lb_dset, ca_dset = random_split(lb_dset, [0.7, 0.3], generator=generator)
-        label_per_class = num_labels // num_classes
-        label_per_class = floor(label_per_class*0.1)
-        if label_per_class == 0:
-            label_per_class = 1
+        # label_per_class = num_labels // num_classes
+        # label_per_class = floor(label_per_class*0.1)
+        # if label_per_class == 0:
+        #     label_per_class = 1
+        #
+        # # Get all labels to be spilt from the labeled dataset;
+        # labels = np.array(lb_dset.targets)
+        #
+        #
+        # cali_idx = []
+        # labeled_idx = np.array(range(len(labels))).tolist()
+        # for i in range(args.num_classes):
+        #     idx = np.where(labels == i)[0]
+        #     idx = np.random.choice(idx, label_per_class, False)
+        #     cali_idx.extend(idx)
+        # labeled_idx = [i for i in labeled_idx if i not in cali_idx]
+        #
+        # ca_dset, lb_dset_new = Subset(lb_dset, cali_idx), Subset(lb_dset, labeled_idx)
 
-        # Get all labels to be spilt from the labeled dataset;
-        labels = np.array(lb_dset.targets)
+        n_cali = args.num_cali
+        assert n_cali <= num_labels, 'Number of calibration data should be smaller than total number of labels! Got {} and {} repectively.'.format(n_cali, num_labels)
 
+        # If calibration numbers smaller than total classes, balance sampling will be disabled;
+        if n_cali < num_classes:
+            n_lb = num_labels - n_cali
+            generator = torch.Generator().manual_seed(42)
+            lb_dset, ca_dset = random_split(lb_dset, [n_lb, n_cali], generator=generator)
+        # Otherwise calibration will be evenly sampled for each class;
+        else:
+            n_cali_per_class = n_cali // num_classes
+            labels = np.array(lb_dset.targets)
+            cali_idx = []
+            labeled_idx = np.array(range(len(labels))).tolist()
+            for i in range(args.num_classes):
+                idx = np.where(labels == i)[0]
+                idx = np.random.choice(idx, n_cali_per_class, False)
+                cali_idx.extend(idx)
+            labeled_idx = [i for i in labeled_idx if i not in cali_idx]
 
-        cali_idx = []
-        # unlabeled data: all training data
-        labeled_idx = np.array(range(len(labels))).tolist()
-        for i in range(args.num_classes):
-            idx = np.where(labels == i)[0]
-            idx = np.random.choice(idx, label_per_class, False)
-            cali_idx.extend(idx)
-        labeled_idx = [i for i in labeled_idx if i not in cali_idx]
+            ca_dset, lb_dset_new = Subset(lb_dset, cali_idx), Subset(lb_dset, labeled_idx)
 
-        ca_dset, lb_dset_new = Subset(lb_dset, cali_idx), Subset(lb_dset, labeled_idx)
+        # Code for adding strongly augmented calibration data back to the labeled dataset;
+        # Will be deprecated in the future;
         if args.confmatch_cali_s:
             ca_dset_s = Subset(lb_dset, cali_idx)
             assert ca_dset_s.dataset.strong_transform is not None

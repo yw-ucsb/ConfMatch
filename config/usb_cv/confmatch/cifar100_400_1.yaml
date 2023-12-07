@@ -3,10 +3,10 @@ algorithm: confmatch
 amp: False
 clip: 0.0
 use_cat: True
-save_dir: /data/y_yin/workspace/usb_cv/cifar100_400
-save_name: confmatch_lambda_0.01_uratio_4_mask_align
+save_dir: /data/yuwang/workspace/usb_cv/confmatch
+save_name: confmatch_n_cali_50
 resume: True
-load_path: /data/y_yin/workspace/usb_cv/confmatch/cifar100_400  # /data/y_yin/workspace/usb_cv/confmatch/cifar100_400_5_cp/cifar100_400_5/model_best.pth
+load_path: /data/yuwang/workspace/usb_cv/confmatch/confmatch_n_cali_50/latest_model.pth
 overwrite: True
 use_tensorboard: False
 use_wandb: True
@@ -17,11 +17,12 @@ T: 0.5
 p_cutoff: 0.95
 ulb_loss_ratio: 1.0
 # Algorithm arguments: ConfMatch;
+num_cali: 50
 n_repeat_loader_cali: 5
 confmatch_alpha: 0.1
 confmatch_delta: 0.1
 confmatch_gamma: 1.0
-conf_loss: True
+conf_loss: False
 lambda_conf: 0.01
 confmatch_cali_s: False
 # Training arguments: Data;
@@ -57,7 +58,7 @@ rank: 0
 multiprocessing_distributed: False
 dist_url: tcp://127.0.0.1:10006
 dist_backend: nccl
-gpu: 1
+gpu: 0
 # Evaluation arguments;
 num_eval_iter: 2048
 eval_batch_size: 128
