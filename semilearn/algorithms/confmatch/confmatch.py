@@ -195,6 +195,8 @@ class ConfMatch(ConfBase):
         self.register_hook(PseudoLabelingHook(), "PseudoLabelingHook")
         self.register_hook(ConfMatchThresholdingHook(alpha=self.alpha, delta=self.delta, gamma=self.gamma), "ThresholdingHook")
         self.register_hook(ConfMatchSoftPseudoLabelingHook(), "SoftPseudoLabelingHook")
+        # Weighted masking and single threshold masking use different hooks;
+        self.register_hook(FixedThresholdingHook(), "MaskingHook")
         # self.register_hook(ConfMatchWeightingHook(num_classes=self.num_classes, n_sigma=self.args.n_sigma, momentum=self.args.ema_p, per_class=self.args.per_class), "MaskingHook")
         # self.register_hook(
         #     DistAlignEMAHook(num_classes=self.num_classes, momentum=self.args.ema_p, p_target_type='uniform' if self.args.dist_uniform else 'model'),
@@ -254,7 +256,7 @@ class ConfMatch(ConfBase):
             # if distribution alignment hook is registered, call it 
             # this is implemented for imbalanced algorithm - CReST
             # uniform distribution alignment 
-            probs_x_ulb_w = self.call_hook("dist_align", "DistAlignHook", probs_x_ulb=probs_x_ulb_w, probs_x_lb=probs_x_lb)
+            # probs_x_ulb_w = self.call_hook("dist_align", "DistAlignHook", probs_x_ulb=probs_x_ulb_w, probs_x_lb=probs_x_lb)
 
 
             # compute mask based on algorithm defined thresholding;

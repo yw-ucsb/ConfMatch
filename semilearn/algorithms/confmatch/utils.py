@@ -39,7 +39,8 @@ class ConfMatchWeightingHook(SoftMatchWeightingHook):
             var = self.prob_max_var_t[max_idx]
         mask = torch.exp(-((torch.clamp(max_probs - mu, max=0.0) ** 2) / (2 * var / (self.n_sigma ** 2))))
         return mask
-        
+
+
 class ConfMatchThresholdingHook(MaskingHook):
     """
     Dynamic Threshold in CpMatch
@@ -72,7 +73,7 @@ class ConfMatchThresholdingHook(MaskingHook):
             o = model(x)["logits"]
 
             smx = torch.nn.Softmax(dim=1)(o)
-            smx = algorithm.call_hook("dist_align", "DistAlignHook", probs_x_ulb=smx)
+            # smx = algorithm.call_hook("dist_align", "DistAlignHook", probs_x_ulb=smx)
 
             y_pred = torch.argmax(smx, dim=1)
             y_prob, _ = smx.max(axis=1)
