@@ -78,7 +78,6 @@ class ConfBase(AlgorithmBase):
             self.optimizer, self.args.num_ft_iter, num_warmup_steps=self.ft_num_warmup_iter
         )
 
-
     def finetune(self):
         """
         Finetuning logs will be appended to the end of the training;
@@ -165,7 +164,7 @@ class ConfMatch(ConfBase):
 
         # CpMatch Loader;
         # Loader that repeats loading the full calibration set for k times for expansion;
-        # Note that each loading will utilize different w augmentation; TODO: check RandCrop!
+        # Note that each loading will utilize different weak augmentation; TODO: check RandCrop!
 
         dset_cali = self.dataset_dict["cali"]
         n_cali = len(dset_cali)
@@ -193,32 +192,9 @@ class ConfMatch(ConfBase):
 
     def set_hooks(self):
         self.register_hook(PseudoLabelingHook(), "PseudoLabelingHook")
-        self.register_hook(ConfMatchThresholdingHook(alpha=self.alpha, delta=self.delta, gamma=self.gamma), "ThresholdingHook")
-        self.register_hook(ConfMatchSoftPseudoLabelingHook(), "SoftPseudoLabelingHook")
-        # self.register_hook(ConfMatchWeightingHook(num_classes=self.num_classes, n_sigma=self.args.n_sigma, momentum=self.args.ema_p, per_class=self.args.per_class), "MaskingHook")
-        # self.register_hook(
-        #     DistAlignEMAHook(num_classes=self.num_classes, momentum=self.args.ema_p, p_target_type='uniform' if self.args.dist_uniform else 'model'),
-        #     "DistAlignHook")
+        self.register_hook(ConfMatchThresholdingHook(self.alpha, self.delta), "ThresholdingHook")
+        self.register_hook(FixedThresholdingHook(), "MaskingHook")
         super().set_hooks()
-
-    def cpmatch_contrastive_loss(self, x_lb, y_lb, T=0.2):
-        # embedding similarity;
-        n = x_lb.shape[0]
-        I = torch.eye(n, device=x_lb.device)
-        
-        x_lb_normed = F.normalize(x_lb, p=2, dim=1)
-        sim = torch.mm(x_lb_normed, x_lb_normed.t().detach())
-        # sim_probs = sim / sim.sum(1, keepdim=True)
-        idx_row, idx_col = torch.meshgrid(y_lb, y_lb)
-        M = self.cf_mat[idx_row, idx_col]
-        # contrastive loss
-        flags = torch.eq(idx_col, idx_row).int() - I
-
-        M = M - flags
-        
-        loss = (sim * M/2).sum()
-
-        return loss
 
     def train_step(self, x_lb, y_lb, x_ulb_w, x_ulb_s, y_ulb):
         num_lb = y_lb.shape[0]
@@ -246,16 +222,8 @@ class ConfMatch(ConfBase):
             feat_dict = {'x_lb': feats_x_lb, 'x_ulb_w': feats_x_ulb_w, 'x_ulb_s': feats_x_ulb_s}
 
             sup_loss = self.ce_loss(logits_x_lb, y_lb, reduction='mean')
-            
-            # probs_x_ulb_w = torch.softmax(logits_x_ulb_w, dim=-1)
-            probs_x_lb = torch.softmax(logits_x_lb.detach(), dim=-1)
-            probs_x_ulb_w = self.compute_prob(logits_x_ulb_w.detach())
-            
-            # if distribution alignment hook is registered, call it 
-            # this is implemented for imbalanced algorithm - CReST
-            # uniform distribution alignment 
-            probs_x_ulb_w = self.call_hook("dist_align", "DistAlignHook", probs_x_ulb=probs_x_ulb_w, probs_x_lb=probs_x_lb)
 
+            probs_x_ulb_w = self.compute_prob(logits_x_ulb_w.detach())
 
             # compute mask based on algorithm defined thresholding;
             mask = self.call_hook("masking", "MaskingHook", logits_x_ulb=probs_x_ulb_w, softmax_x_ulb=False)
@@ -266,15 +234,8 @@ class ConfMatch(ConfBase):
                                           use_hard_label=self.use_hard_label,
                                           T=self.T,
                                           softmax=False)
-            use_soft_label = False
-            if use_soft_label:
-                unsup_loss = self.consistency_loss(logits_x_ulb_s,
-                                                self.cf_mat_pred[:,pseudo_label].T,
-                                                'ce',
-                                                mask=mask)
 
-            else:
-                unsup_loss = self.consistency_loss(logits_x_ulb_s,
+            unsup_loss = self.consistency_loss(logits_x_ulb_s,
                                                 pseudo_label,
                                                 'ce',
                                                 mask=mask)
@@ -298,8 +259,8 @@ class ConfMatch(ConfBase):
                                          total_loss=total_loss.item(), 
                                          util_ratio=mask.float().mean().item(),
                                          threshold=self.p_cutoff,
-                                         alpha=self.hooks_dict["ThresholdingHook"].cp_alpha,
-                                         cali_acc=1-self.cal_error_rate,
+                                         alpha=self.hooks_dict["ThresholdingHook"].alpha,
+                                         cali_acc=1. - self.cal_error_rate,
                                          ulb_select_top1=ulb_select_top1.item(),
                                          )
         return out_dict, log_dict
@@ -403,7 +364,7 @@ class ConfMatch(ConfBase):
             # Archived;
             SSL_Argument("--confmatch_cali_s", default=False, type=bool,
                          help="Strong argumented calibration data for training"),
-            # Softmatch
+            # Softmatch;
             SSL_Argument('--dist_align', str2bool, True),
             SSL_Argument('--dist_uniform', str2bool, True),
             SSL_Argument('--ema_p', float, 0.999),

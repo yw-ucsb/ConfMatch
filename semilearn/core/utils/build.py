@@ -137,7 +137,7 @@ def get_dataset(args, algorithm, dataset, num_labels, num_classes, data_dir='./d
         if n_cali < num_classes:
             n_lb = num_labels - n_cali
             generator = torch.Generator().manual_seed(42)
-            lb_dset, ca_dset = random_split(lb_dset, [n_lb, n_cali], generator=generator)
+            lb_dset_new, ca_dset = random_split(lb_dset, [n_lb, n_cali], generator=generator)
         # Otherwise calibration will be evenly sampled for each class;
         else:
             n_cali_per_class = n_cali // num_classes

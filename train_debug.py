@@ -454,10 +454,10 @@ def main_worker(gpu, ngpus_per_node, args):
 if __name__ == "__main__":
     cfg_path = 'config/usb_cv/confmatch/eurosat_40_0.yaml'
     cfg_path = 'config/usb_cv/fixmatch/fixmatch_eurosat_40_0.yaml'
-    cfg_path = 'config/usb_cv/confmatch/stl10_40_0.yaml'
+    cfg_path = 'config/usb_cv/confmatch/cifar100_400_1.yaml'
     args = get_config(cfg_path)
     port = get_port()
     args.dist_url = "tcp://127.0.0.1:" + str(port)
     model = main(args)
-    loaders = model.loader_dict
-    datas = model.dataset_dict
+    # loaders = model.loader_dict
+    # datas = model.dataset_dict
