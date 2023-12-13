@@ -1,6 +1,6 @@
 ConfMatch: semi-supervised learning with conformal prediction.
 
-The major training framework is developed and maintained in Microsoft USB.
+The major training framework is developed and maintained in [Microsoft USB](https://github.com/microsoft/Semi-supervised-learning).
 
 ## Citing USB
 
